@@ -1,0 +1,33 @@
+name: Release userscript
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Validate userscript and release tag
+        run: npm run check
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+      - name: Create checksum
+        run: sha256sum facebook-simple-downloader.user.js > SHA256SUMS
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release create "${GITHUB_REF_NAME}"
+          facebook-simple-downloader.user.js
+          SHA256SUMS
+          --generate-notes
+          --title "Facebook Image Downloader ${GITHUB_REF_NAME}"

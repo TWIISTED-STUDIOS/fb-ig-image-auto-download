@@ -1,0 +1,59 @@
+name: Bug report
+description: Report a reproducible problem with the Facebook photo downloader
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Do not include cookies, passwords, access tokens, private photos, or complete signed CDN URLs.
+  - type: input
+    id: version
+    attributes:
+      label: Userscript version
+      placeholder: 1.0.1
+    validations:
+      required: true
+  - type: input
+    id: browser
+    attributes:
+      label: Browser and Tampermonkey versions
+    validations:
+      required: true
+  - type: dropdown
+    id: page
+    attributes:
+      label: Facebook page type
+      options:
+        - Profile photos
+        - Album
+        - Photos tab
+        - Feed or post
+        - Photo viewer
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: Expected and actual result
+    validations:
+      required: true
+  - type: textarea
+    id: error
+    attributes:
+      label: Exact error text
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I disabled older experimental versions before testing.
+          required: true
+        - label: I removed personal information and secrets from this report.
+          required: true
