@@ -2,7 +2,7 @@
 
 All notable changes to the maintained Facebook downloader are documented here.
 
-## Unreleased
+## 1.0.3 - 2026-08-03
 
 ### Fixed
 
