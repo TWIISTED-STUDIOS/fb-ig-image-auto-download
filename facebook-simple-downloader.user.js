@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Facebook Image Downloader - Verified Full Resolution
 // @namespace    https://github.com/TWIISTED-STUDIOS/fb-ig-image-auto-download
-// @version      1.0.1
+// @version      1.0.2
 // @description  Deep-scan Facebook photos, resolve verified maximum-resolution files, check a chosen folder for existing images, and download individually or in bulk.
 // @author       Bibek Chand Sah (original project); TWIISTED-STUDIOS contributors (maintained rewrite)
 // @homepageURL  https://github.com/TWIISTED-STUDIOS/fb-ig-image-auto-download
@@ -71,6 +71,7 @@
     const retainedImages = new Map();
     const inlineProcessedImages = new WeakSet();
     let downloadHistory = loadDownloadHistory();
+    let accountNameCache = { routeKey: '', value: '' };
 
     GM_addStyle(`
         #${IDS.button} {
@@ -1811,6 +1812,10 @@
             // Start at the top so virtualised album tiles are seen in order.
             window.scrollTo({ top: 0, behavior: 'auto' });
             await sleep(SETTINGS.initialDelayMs);
+            // Capture the filename prefix while the profile header is definitely
+            // on screen. Facebook may virtualise that header out of the DOM by
+            // the time a long scan reaches the bottom.
+            detectAccountName();
             captureVisibleImages(retainedImages);
 
             observer = createLiveCaptureObserver(retainedImages);
@@ -1934,8 +1939,8 @@
 
     const GENERIC_FACEBOOK_ACCOUNT_LABELS = new Set([
         'about', 'account', 'accounts', 'all photos', 'albums', 'chat', 'chats', 'check-ins', 'checkins',
-        'create story', 'events', 'facebook', 'feeds', 'friends', 'gaming',
-        'groups', 'home', 'log in', 'marketplace', 'menu', 'messages',
+        'add friend', 'create story', 'events', 'facebook', 'feeds', 'follow', 'friends', 'gaming',
+        'groups', 'home', 'like', 'log in', 'marketplace', 'menu', 'message', 'messages',
         'messenger', 'more', 'notifications', 'photos', 'posts', 'profile',
         'reels', 'search', 'settings', 'stories', 'videos', 'watch', 'your profile'
     ]);
@@ -2022,6 +2027,48 @@
         return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
     }
 
+    function directElementText(element) {
+        if (!(element instanceof Element)) return '';
+        return Array.from(element.childNodes)
+            .filter(node => node.nodeType === Node.TEXT_NODE)
+            .map(node => String(node.nodeValue || '').replace(/ /g, ' '))
+            .join(' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+
+    function accountNameTextFromElement(element) {
+        if (!(element instanceof Element)) return '';
+        // Facebook currently renders some profile names as a focusable role=button
+        // div whose name is a direct text node followed by empty decorative children.
+        // Prefer that direct text so descendant hover/visual-completion nodes cannot
+        // contaminate the filename prefix.
+        const direct = directElementText(element);
+        return direct || String(element.textContent || '').replace(/ /g, ' ').trim();
+    }
+
+    function profileRouteCacheKey(profileRoute = currentProfileRoute()) {
+        if (profileRoute?.type && profileRoute?.value) {
+            return `${profileRoute.type}:${profileRoute.value}`;
+        }
+        try {
+            const parsed = new URL(location.href);
+            return `url:${parsed.pathname.replace(/\/+$/, '') || '/'}:${parsed.searchParams.get('id') || ''}`;
+        } catch (_) {
+            return `url:${location.pathname || '/'}`;
+        }
+    }
+
+    function cacheAccountName(value, profileRoute = currentProfileRoute()) {
+        const cleaned = cleanAccountNameCandidate(value);
+        if (!cleaned) return '';
+        accountNameCache = {
+            routeKey: profileRouteCacheKey(profileRoute),
+            value: cleaned
+        };
+        return cleaned;
+    }
+
     function profileHeaderNameCandidates(profileRoute) {
         const candidates = [];
         const seen = new Set();
@@ -2033,6 +2080,30 @@
             seen.add(key);
             candidates.push({ value: cleaned, source, element, score });
         };
+
+        // Newer Facebook profile layouts sometimes render the visible account
+        // name as a focusable role=button div rather than an h1. Its useful name
+        // is a direct text node; the child span/div nodes are decorative. Class
+        // names are intentionally not used because Facebook rotates them.
+        for (const element of document.querySelectorAll(
+            '[role="main"] div[role="button"][tabindex="0"], main div[role="button"][tabindex="0"]'
+        )) {
+            if (!visibleElement(element)) continue;
+            const value = directElementText(element);
+            if (!value) continue;
+            const rect = element.getBoundingClientRect();
+            if (rect.height > 110 || rect.width > Math.max(760, window.innerWidth * 0.75)) continue;
+            const style = getComputedStyle(element);
+            const fontSize = Number.parseFloat(style.fontSize) || 0;
+            let score = 72;
+            if (element.closest('[role="main"], main')) score += 22;
+            if (element.closest('h1, h2, [role="heading"]')) score += 35;
+            if (fontSize >= 28) score += 75;
+            else if (fontSize >= 22) score += 52;
+            else if (fontSize >= 18) score += 24;
+            if (Array.from(element.children).every(child => !String(child.textContent || '').trim())) score += 16;
+            push(value, 'direct-text profile name button', element, score);
+        }
 
         // Restore the source that worked in v0.7.4/v0.7.5: Facebook's visible
         // profile-name H1. Restrict it to the main content before trying any
@@ -2050,7 +2121,7 @@
                 if (selector.includes('h1')) score += 35;
                 if (element.closest('[role="main"], main')) score += 25;
                 if (element.querySelector('a[href]')) score += 8;
-                push(element.textContent, `profile heading: ${selector}`, element, score);
+                push(accountNameTextFromElement(element), `profile heading: ${selector}`, element, score);
             }
         }
 
@@ -2062,7 +2133,7 @@
                 let score = 80;
                 if (anchor.closest('[role="main"], main')) score += 25;
                 if (anchor.closest('h1, h2, [role="heading"]')) score += 30;
-                push(anchor.textContent, 'exact profile-root link', anchor, score);
+                push(accountNameTextFromElement(anchor), 'exact profile-root link', anchor, score);
                 push(anchor.getAttribute('aria-label'), 'exact profile-root aria-label', anchor, score - 5);
             }
         }
@@ -2077,14 +2148,18 @@
             if (!countPattern.test(countText) || !visibleElement(countElement)) continue;
             const countRect = countElement.getBoundingClientRect();
             const scope = countElement.closest('header, section, [role="main"], main') || document;
-            for (const candidateElement of scope.querySelectorAll('h1, h2, [role="heading"], a[href], span[dir="auto"]')) {
+            for (const candidateElement of scope.querySelectorAll('h1, h2, [role="heading"], a[href], span[dir="auto"], div[role="button"][tabindex="0"]')) {
                 if (candidateElement === countElement || !visibleElement(candidateElement)) continue;
                 const rect = candidateElement.getBoundingClientRect();
                 const verticalGap = countRect.top - rect.bottom;
                 if (verticalGap < -4 || verticalGap > 180) continue;
                 if (Math.abs(rect.left - countRect.left) > Math.max(260, countRect.width * 1.5)) continue;
-                const score = 120 - Math.min(100, verticalGap) + (candidateElement.matches('h1, [aria-level="1"]') ? 35 : 0);
-                push(candidateElement.textContent, 'nearest text above friends/followers count', candidateElement, score);
+                const style = getComputedStyle(candidateElement);
+                const fontSize = Number.parseFloat(style.fontSize) || 0;
+                const score = 120 - Math.min(100, verticalGap)
+                    + (candidateElement.matches('h1, [aria-level="1"]') ? 35 : 0)
+                    + (candidateElement.matches('div[role="button"][tabindex="0"]') && fontSize >= 22 ? 55 : 0);
+                push(accountNameTextFromElement(candidateElement), 'nearest text above friends/followers count', candidateElement, score);
             }
         }
 
@@ -2097,8 +2172,9 @@
         // Use the visible profile heading before document metadata. Facebook's
         // metadata can become stale during SPA navigation and may contain a tab
         // title or a friends count instead of the account name.
+        const routeKey = profileRouteCacheKey(profileRoute);
         const headerCandidates = profileHeaderNameCandidates(profileRoute);
-        if (headerCandidates.length) return headerCandidates[0].value;
+        if (headerCandidates.length) return cacheAccountName(headerCandidates[0].value, profileRoute);
 
         // Photo descriptions are useful when the profile header has not yet
         // rendered or when viewing an individual photo route.
@@ -2112,8 +2188,15 @@
             for (const pattern of patterns) {
                 const match = description.match(pattern);
                 const cleaned = cleanAccountNameCandidate(match?.[1]);
-                if (cleaned) return cleaned;
+                if (cleaned) return cacheAccountName(cleaned, profileRoute);
             }
+        }
+
+        // The scan starts at the top of the profile, where the name is normally
+        // available. Reuse that strong result later when Facebook virtualises the
+        // header out of the DOM while the scan is at the bottom.
+        if (accountNameCache.routeKey === routeKey && accountNameCache.value) {
+            return accountNameCache.value;
         }
 
         // Metadata is deliberately lower priority because Facebook often leaves
@@ -2124,14 +2207,14 @@
             document.title
         ]) {
             const cleaned = cleanAccountNameCandidate(value);
-            if (cleaned) return cleaned;
+            if (cleaned) return cacheAccountName(cleaned, profileRoute);
         }
 
         if (profileRoute?.fallback) {
             const fallback = cleanAccountNameCandidate(
                 String(profileRoute.fallback).replace(/[._-]+/g, ' ')
             );
-            if (fallback) return fallback;
+            if (fallback) return cacheAccountName(fallback, profileRoute);
         }
         return 'Facebook';
     }

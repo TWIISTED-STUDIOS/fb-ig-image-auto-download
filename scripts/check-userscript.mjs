@@ -27,7 +27,7 @@ if (metadataMatch) {
 const requiredSingle = {
   name: 'Facebook Image Downloader - Verified Full Resolution',
   namespace: 'https://github.com/TWIISTED-STUDIOS/fb-ig-image-auto-download',
-  version: '1.0.1',
+  version: '1.0.2',
   author: 'Bibek Chand Sah (original project); TWIISTED-STUDIOS contributors (maintained rewrite)',
   homepageURL: 'https://github.com/TWIISTED-STUDIOS/fb-ig-image-auto-download',
   supportURL: 'https://github.com/TWIISTED-STUDIOS/fb-ig-image-auto-download/issues',

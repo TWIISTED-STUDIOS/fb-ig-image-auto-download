@@ -2,6 +2,15 @@
 
 All notable changes to the maintained Facebook downloader are documented here.
 
+## 1.0.2 - 2026-08-03
+
+### Fixed
+
+- Detect profile names rendered by Facebook as focusable `role="button"` divs with direct text nodes
+- Cache the detected account name while the scan is at the top of the profile, before Facebook virtualises the header out of the DOM
+- Prefer direct element text so decorative visual-completion children cannot pollute filename prefixes
+- Reject additional Facebook action labels such as Add friend, Follow, Like, and Message
+
 ## 1.0.1 - 2026-08-01
 
 - Added professional clean-fork packaging with a preserved `legacy` branch and exact semantic release tagging.
