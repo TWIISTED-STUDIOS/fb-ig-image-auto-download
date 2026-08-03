@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Facebook Image Downloader - Verified Full Resolution
 // @namespace    https://github.com/TWIISTED-STUDIOS/fb-ig-image-auto-download
-// @version      1.0.2
+// @version      1.0.3
 // @description  Deep-scan Facebook photos, resolve verified maximum-resolution files, check a chosen folder for existing images, and download individually or in bulk.
 // @author       Bibek Chand Sah (original project); TWIISTED-STUDIOS contributors (maintained rewrite)
 // @homepageURL  https://github.com/TWIISTED-STUDIOS/fb-ig-image-auto-download
@@ -68,6 +68,8 @@
     let stopScanRequested = false;
     let resolverWindowHandle = null;
     let inlineScanTimer = null;
+    let launcherResizeHandler = null;
+    let retainedProfileKey = '';
     const retainedImages = new Map();
     const inlineProcessedImages = new WeakSet();
     let downloadHistory = loadDownloadHistory();
@@ -970,6 +972,23 @@
         }
     }
 
+    function isFacebookPageUrl(value) {
+        try {
+            const parsed = new URL(value, location.href);
+            const hostname = parsed.hostname.toLowerCase();
+            return parsed.protocol === 'https:' &&
+                (hostname === 'facebook.com' || hostname.endsWith('.facebook.com'));
+        } catch (_) {
+            return false;
+        }
+    }
+
+    function assertFacebookPageUrl(value) {
+        if (!isFacebookPageUrl(value)) {
+            throw new Error('Blocked a non-Facebook photo-page URL.');
+        }
+    }
+
     function parseSizeTokens(value) {
         const result = [];
         const pattern = /(?:^|[_-])(mx|[sp])(\d+)x(\d+)(?=$|[_-])/gi;
@@ -1204,12 +1223,12 @@
         let node = img.closest('a[href]');
         while (node) {
             const href = normalizeUrl(node.href);
-            if (
+            if (isFacebookPageUrl(href) && (
                 /\/photos?\//i.test(href) ||
                 /[?&]fbid=\d+/i.test(href) ||
                 /[?&]set=a\./i.test(href) ||
                 /\/photo\.php/i.test(href)
-            ) {
+            )) {
                 return href;
             }
             node = node.parentElement?.closest?.('a[href]') || null;
@@ -1237,15 +1256,28 @@
         return true;
     }
 
+    function extractPhotoId(value) {
+        if (!value) return '';
+
+        const keyMatch = String(value).match(/(?:photo:|fbid=)(\d{5,})/i);
+        if (keyMatch?.[1]) return keyMatch[1];
+
+        try {
+            const parsed = new URL(value, location.href);
+            const queryId = parsed.searchParams.get('fbid') || parsed.searchParams.get('story_fbid');
+            if (queryId && /^\d+$/.test(queryId)) return queryId;
+            return parsed.pathname.match(/\/(?:photos?|photo)\/(?:[^/]+\/)?(\d{5,})(?:\/|$)/i)?.[1] || '';
+        } catch (_) {
+            return '';
+        }
+    }
+
     function canonicalSourceKey(sourceUrl) {
         if (!sourceUrl) return '';
         try {
             const parsed = new URL(sourceUrl, location.href);
-            const photoId = parsed.searchParams.get('fbid');
+            const photoId = extractPhotoId(parsed.href);
             if (photoId) return `photo:${photoId}`;
-
-            const pathId = parsed.pathname.match(/\/(?:photos?|photo)\/(?:[^/]+\/)?(\d{5,})(?:\/|$)/i)?.[1];
-            if (pathId) return `photo:${pathId}`;
 
             // Preserve the actual photo/album item link, but remove common
             // tracking parameters that create false duplicates.
@@ -1370,7 +1402,12 @@
 
     function persistRetainedImages() {
         try {
-            sessionStorage.setItem(SETTINGS.sessionKey, JSON.stringify(Array.from(retainedImages.values())));
+            retainedProfileKey ||= currentRetentionProfileKey();
+            sessionStorage.setItem(SETTINGS.sessionKey, JSON.stringify({
+                version: 2,
+                profileKey: retainedProfileKey,
+                items: Array.from(retainedImages.values())
+            }));
         } catch (error) {
             console.warn('Could not persist retained Facebook image list:', error);
         }
@@ -1378,9 +1415,28 @@
 
     function loadRetainedImages() {
         try {
-            const parsed = JSON.parse(sessionStorage.getItem(SETTINGS.sessionKey) || '[]');
-            if (!Array.isArray(parsed)) return;
-            for (const item of parsed) {
+            const raw = sessionStorage.getItem(SETTINGS.sessionKey);
+            retainedProfileKey = currentRetentionProfileKey();
+            if (!raw) return;
+
+            const parsed = JSON.parse(raw);
+            // Older manifests did not record which profile supplied their
+            // images, so they cannot be restored without risking cross-profile
+            // contamination.
+            if (Array.isArray(parsed)) {
+                sessionStorage.removeItem(SETTINGS.sessionKey);
+                return;
+            }
+
+            const storedProfileKey = String(parsed?.profileKey || '');
+            if (retainedProfileKey && storedProfileKey !== retainedProfileKey) {
+                sessionStorage.removeItem(SETTINGS.sessionKey);
+                return;
+            }
+
+            retainedProfileKey = storedProfileKey || retainedProfileKey;
+            const items = Array.isArray(parsed?.items) ? parsed.items : [];
+            for (const item of items) {
                 if (item?.key && item?.fullUrl) retainedImages.set(item.key, item);
             }
         } catch (error) {
@@ -1392,6 +1448,29 @@
         retainedImages.clear();
         try { sessionStorage.removeItem(SETTINGS.sessionKey); } catch (_) { /* ignore */ }
         updateMainButtonIdle();
+    }
+
+    function currentRetentionProfileKey() {
+        const profileRoute = currentProfileRoute();
+        if (!profileRoute?.type || !profileRoute?.value) return '';
+        return `${profileRoute.type}:${String(profileRoute.value).toLowerCase()}`;
+    }
+
+    function ensureRetainedProfileScope() {
+        const nextProfileKey = currentRetentionProfileKey();
+        // Photo viewers and other routes do not identify their owning profile
+        // reliably. Keep the current scope until a definite profile appears.
+        if (!nextProfileKey) return false;
+        if (!retainedProfileKey) {
+            retainedProfileKey = nextProfileKey;
+            return false;
+        }
+        if (retainedProfileKey === nextProfileKey) return false;
+
+        retainedProfileKey = nextProfileKey;
+        retainedImages.clear();
+        try { sessionStorage.removeItem(SETTINGS.sessionKey); } catch (_) { /* ignore */ }
+        return true;
     }
 
     function loadDownloadHistory() {
@@ -1795,6 +1874,8 @@
             setMainButton(`Stopping scan… ${retainedImages.size} retained`, false, 'progress');
             return;
         }
+
+        ensureRetainedProfileScope();
 
         scanning = true;
         stopScanRequested = false;
@@ -2220,22 +2301,12 @@
     }
 
     function facebookPhotoId(item) {
-        const values = [item?.sourceUrl, item?.key];
+        // Prefer the canonical key because it has already disambiguated URL
+        // forms such as /photos/{owner-id}/{photo-id}/.
+        const values = [item?.key, item?.sourceUrl];
         for (const value of values) {
-            if (!value) continue;
-
-            const keyMatch = String(value).match(/(?:photo:|fbid=)(\d{5,})/i);
-            if (keyMatch?.[1]) return keyMatch[1];
-
-            try {
-                const parsed = new URL(value, location.href);
-                const fbid = parsed.searchParams.get('fbid') || parsed.searchParams.get('story_fbid');
-                if (fbid && /^\d+$/.test(fbid)) return fbid;
-                const pathId = parsed.pathname.match(/\/(\d{5,})(?:\/|$)/)?.[1];
-                if (pathId) return pathId;
-            } catch (_) {
-                // Continue to the next candidate.
-            }
+            const photoId = extractPhotoId(value);
+            if (photoId) return photoId;
         }
         return '';
     }
@@ -2399,6 +2470,7 @@
         }
 
         const targetUrl = normalizeUrl(initialUrl) || `${location.origin}/`;
+        assertFacebookPageUrl(targetUrl);
         resolverWindowHandle = window.open(
             targetUrl,
             SETTINGS.resolverWindowName,
@@ -2428,17 +2500,6 @@
             // Ignore close failures.
         }
         resolverWindowHandle = null;
-    }
-
-    function extractPhotoId(value) {
-        try {
-            const parsed = new URL(value, location.href);
-            const queryId = parsed.searchParams.get('fbid');
-            if (queryId) return queryId;
-            return parsed.pathname.match(/\/(?:photo|photos)\/(?:[^/]+\/)?(\d{5,})(?:\/|$)/i)?.[1] || '';
-        } catch (_) {
-            return '';
-        }
     }
 
     function popupCandidate(value, descriptor = '', source = '') {
@@ -2574,6 +2635,7 @@
         const helper = ensureResolverWindow();
         const targetUrl = new URL(item.sourceUrl, location.href);
         targetUrl.hash = '';
+        assertFacebookPageUrl(targetUrl.href);
         const targetPhotoId = extractPhotoId(targetUrl.href);
 
         try {
@@ -2904,6 +2966,15 @@
             '#334155';
     }
 
+    function clampLauncherPosition(left, top, viewportWidth, viewportHeight, launcherWidth, launcherHeight) {
+        const maxLeft = Math.max(0, Number(viewportWidth || 0) - Number(launcherWidth || 0));
+        const maxTop = Math.max(0, Number(viewportHeight || 0) - Number(launcherHeight || 0));
+        return {
+            left: Math.max(0, Math.min(Number(left) || 0, maxLeft)),
+            top: Math.max(0, Math.min(Number(top) || 0, maxTop))
+        };
+    }
+
     function currentFilenamePrefix(modal) {
         return sanitizeFilenamePart(
             modal.querySelector('.fbfr-prefix-input')?.value || detectAccountName(modal._fbfrImages)
@@ -2991,14 +3062,14 @@
 
         if (typeof directoryHandle.entries === 'function') {
             for await (const [name, handle] of directoryHandle.entries()) {
-                if (!handle || handle.kind === 'file') filenames.add(String(name).toLowerCase());
+                if (!handle || handle.kind === 'file') filenames.add(String(name));
             }
             return filenames;
         }
 
         if (typeof directoryHandle.values === 'function') {
             for await (const handle of directoryHandle.values()) {
-                if (handle?.kind === 'file' && handle.name) filenames.add(String(handle.name).toLowerCase());
+                if (handle?.kind === 'file' && handle.name) filenames.add(String(handle.name));
             }
             return filenames;
         }
@@ -3008,9 +3079,9 @@
 
     function matchingExistingFilename(fileNames, base) {
         if (!(fileNames instanceof Set) || !base) return '';
-        const lowerBase = String(base).toLowerCase();
+        const exactBase = String(base);
         for (const extension of SUPPORTED_IMAGE_EXTENSIONS) {
-            const candidate = `${lowerBase}.${extension}`;
+            const candidate = `${exactBase}.${extension}`;
             if (fileNames.has(candidate)) return candidate;
         }
         return '';
@@ -3294,7 +3365,7 @@
                     const sourceLabel = resolutionSource.startsWith('background') ? 'background' : 'viewer fallback';
 
                     if (file.skipped) {
-                        modal._fbfrFolderFileNames?.add(file.name.toLowerCase());
+                        modal._fbfrFolderFileNames?.add(file.name);
                         updateDownloadHistory(item, 'skipped_existing', {
                             filename: file.name,
                             width: dimensions.width,
@@ -3310,7 +3381,7 @@
 
                     setModalStatus(`Writing ${position}/${selected.length}: ${file.name} (${dimensions.width}×${dimensions.height})`);
                     await writeBuffer(file.handle, fetched.buffer, fetched.contentType);
-                    modal._fbfrFolderFileNames?.add(file.name.toLowerCase());
+                    modal._fbfrFolderFileNames?.add(file.name);
                     updateDownloadHistory(item, 'saved', {
                         filename: file.name,
                         width: dimensions.width,
@@ -3864,7 +3935,11 @@
     }
 
     function addMainButton() {
-        if (document.getElementById(IDS.button)) return;
+        const profileChanged = ensureRetainedProfileScope();
+        if (document.getElementById(IDS.button)) {
+            if (profileChanged) updateMainButtonIdle();
+            return;
+        }
 
         const container = document.createElement('div');
         container.id = IDS.container;
@@ -3974,10 +4049,16 @@
         });
         dragHandle.addEventListener('pointermove', event => {
             if (!dragging) return;
-            const left = Math.max(0, Math.min(event.clientX - offsetX, window.innerWidth - container.offsetWidth));
-            const top = Math.max(0, Math.min(event.clientY - offsetY, window.innerHeight - container.offsetHeight));
-            container.style.left = `${left}px`;
-            container.style.top = `${top}px`;
+            const position = clampLauncherPosition(
+                event.clientX - offsetX,
+                event.clientY - offsetY,
+                window.innerWidth,
+                window.innerHeight,
+                container.offsetWidth,
+                container.offsetHeight
+            );
+            container.style.left = `${position.left}px`;
+            container.style.top = `${position.top}px`;
             container.style.right = 'auto';
         });
         const finishDrag = () => {
@@ -3997,19 +4078,45 @@
             event.stopPropagation();
         });
 
+        container.append(button, menu, dragHandle);
+        document.body.appendChild(container);
+
         try {
             const saved = JSON.parse(localStorage.getItem('fbfr-original-ui-position') || 'null');
             if (Number.isFinite(saved?.left) && Number.isFinite(saved?.top)) {
-                container.style.left = `${Math.max(0, saved.left)}px`;
-                container.style.top = `${Math.max(0, saved.top)}px`;
+                const position = clampLauncherPosition(
+                    saved.left,
+                    saved.top,
+                    window.innerWidth,
+                    window.innerHeight,
+                    container.offsetWidth,
+                    container.offsetHeight
+                );
+                container.style.left = `${position.left}px`;
+                container.style.top = `${position.top}px`;
                 container.style.right = 'auto';
             }
         } catch (_) {
             // Use the default top-right position.
         }
 
-        container.append(button, menu, dragHandle);
-        document.body.appendChild(container);
+        if (launcherResizeHandler) window.removeEventListener('resize', launcherResizeHandler);
+        launcherResizeHandler = () => {
+            if (container.style.right !== 'auto') return;
+            const rect = container.getBoundingClientRect();
+            const position = clampLauncherPosition(
+                rect.left,
+                rect.top,
+                window.innerWidth,
+                window.innerHeight,
+                container.offsetWidth,
+                container.offsetHeight
+            );
+            container.style.left = `${position.left}px`;
+            container.style.top = `${position.top}px`;
+        };
+        window.addEventListener('resize', launcherResizeHandler);
+
         updateMainButtonIdle();
     }
 

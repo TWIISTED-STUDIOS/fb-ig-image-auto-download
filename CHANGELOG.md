@@ -2,6 +2,20 @@
 
 All notable changes to the maintained Facebook downloader are documented here.
 
+## 1.0.3 - 2026-08-03
+
+### Fixed
+
+- Use the actual photo ID for numeric `/photos/{owner}/{photo}/` URLs so distinct photos do not share filenames or history
+- Restrict viewer fallback discovery and navigation to HTTPS Facebook pages
+- Preserve exact filename casing when inventorying folders on case-sensitive filesystems
+- Keep the draggable launcher inside the viewport after restoring its position or resizing the window
+- Scope retained scan results to the current Facebook profile so navigating to another profile starts clean
+
+### Tests
+
+- Add focused Node regression tests for photo identity, URL validation, folder filename casing, and launcher positioning
+
 ## 1.0.2 - 2026-08-03
 
 ### Fixed
