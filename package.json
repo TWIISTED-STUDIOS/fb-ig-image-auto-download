@@ -4,7 +4,8 @@
   "private": true,
   "description": "Validation tools for the TWIISTED-STUDIOS maintained Facebook full-resolution userscript.",
   "scripts": {
-    "check": "node scripts/check-userscript.mjs"
+    "check": "node scripts/check-userscript.mjs && node --test scripts/userscript.test.mjs",
+    "test": "node --test scripts/userscript.test.mjs"
   },
   "engines": {
     "node": ">=18"
