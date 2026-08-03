@@ -2,6 +2,21 @@
 
 All notable changes to the maintained Facebook downloader are documented here.
 
+## Unreleased
+
+### Fixed
+
+- Retry initially empty lazy images when Facebook later assigns their real source
+- Preserve every debounced mutation batch so rapidly inserted photos are not skipped
+
+### Changed
+
+- Replace the five-second whole-document image sweep with targeted mutation processing
+
+### Tests
+
+- Add Playwright coverage for initial, lazy, and rapidly inserted images plus launcher interaction
+
 ## 1.0.3 - 2026-08-03
 
 ### Fixed

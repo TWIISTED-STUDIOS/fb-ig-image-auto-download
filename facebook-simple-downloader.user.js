@@ -1751,13 +1751,15 @@
 
         const item = itemFromImageElement(img);
         if (!item?.sourceUrl) {
-            inlineProcessedImages.add(img);
+            // Facebook frequently inserts an empty img before assigning its
+            // lazy src/srcset. Leave it eligible so the attribute observer can
+            // retry it when the real photo source arrives.
             return false;
         }
 
         const host = img.closest('a[href]') || img.parentElement;
         if (!(host instanceof HTMLElement) || !host.contains(img)) {
-            inlineProcessedImages.add(img);
+            // Reparented virtual-grid images may gain a valid host later.
             return false;
         }
         if (host.querySelector(':scope > .fbfr-inline-download')) {
@@ -1798,18 +1800,23 @@
 
     function startInlineDownloadMonitoring() {
         scanForInlineDownloadIcons();
+        const pendingRoots = new Set();
+        const flushPendingRoots = () => {
+            const roots = Array.from(pendingRoots);
+            pendingRoots.clear();
+            for (const root of roots) scanForInlineDownloadIcons(root);
+        };
         const observer = new MutationObserver(mutations => {
-            window.clearTimeout(inlineScanTimer);
-            inlineScanTimer = window.setTimeout(() => {
-                for (const mutation of mutations) {
-                    if (mutation.type === 'attributes' && mutation.target instanceof HTMLImageElement) {
-                        addInlineDownloadIcon(mutation.target);
-                    }
-                    for (const node of mutation.addedNodes || []) {
-                        if (node instanceof Element) scanForInlineDownloadIcons(node);
-                    }
+            for (const mutation of mutations) {
+                if (mutation.type === 'attributes' && mutation.target instanceof HTMLImageElement) {
+                    pendingRoots.add(mutation.target);
                 }
-            }, 400);
+                for (const node of mutation.addedNodes || []) {
+                    if (node instanceof Element) pendingRoots.add(node);
+                }
+            }
+            window.clearTimeout(inlineScanTimer);
+            inlineScanTimer = window.setTimeout(flushPendingRoots, 400);
         });
         observer.observe(document.documentElement, {
             childList: true,
@@ -1817,7 +1824,6 @@
             attributes: true,
             attributeFilter: ['src', 'srcset', 'data-src', 'data-srcset']
         });
-        window.setInterval(scanForInlineDownloadIcons, 5000);
     }
 
     function setMainButton(text, disabled = false, scanState = scanning ? 'progress' : 'idle', stallCount = 0) {
