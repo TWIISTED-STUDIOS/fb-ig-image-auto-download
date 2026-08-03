@@ -10,6 +10,7 @@ All notable changes to the maintained Facebook downloader are documented here.
 - Restrict viewer fallback discovery and navigation to HTTPS Facebook pages
 - Preserve exact filename casing when inventorying folders on case-sensitive filesystems
 - Keep the draggable launcher inside the viewport after restoring its position or resizing the window
+- Scope retained scan results to the current Facebook profile so navigating to another profile starts clean
 
 ### Tests
 

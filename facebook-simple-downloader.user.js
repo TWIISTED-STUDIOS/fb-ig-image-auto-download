@@ -69,6 +69,7 @@
     let resolverWindowHandle = null;
     let inlineScanTimer = null;
     let launcherResizeHandler = null;
+    let retainedProfileKey = '';
     const retainedImages = new Map();
     const inlineProcessedImages = new WeakSet();
     let downloadHistory = loadDownloadHistory();
@@ -1401,7 +1402,12 @@
 
     function persistRetainedImages() {
         try {
-            sessionStorage.setItem(SETTINGS.sessionKey, JSON.stringify(Array.from(retainedImages.values())));
+            retainedProfileKey ||= currentRetentionProfileKey();
+            sessionStorage.setItem(SETTINGS.sessionKey, JSON.stringify({
+                version: 2,
+                profileKey: retainedProfileKey,
+                items: Array.from(retainedImages.values())
+            }));
         } catch (error) {
             console.warn('Could not persist retained Facebook image list:', error);
         }
@@ -1409,9 +1415,28 @@
 
     function loadRetainedImages() {
         try {
-            const parsed = JSON.parse(sessionStorage.getItem(SETTINGS.sessionKey) || '[]');
-            if (!Array.isArray(parsed)) return;
-            for (const item of parsed) {
+            const raw = sessionStorage.getItem(SETTINGS.sessionKey);
+            retainedProfileKey = currentRetentionProfileKey();
+            if (!raw) return;
+
+            const parsed = JSON.parse(raw);
+            // Older manifests did not record which profile supplied their
+            // images, so they cannot be restored without risking cross-profile
+            // contamination.
+            if (Array.isArray(parsed)) {
+                sessionStorage.removeItem(SETTINGS.sessionKey);
+                return;
+            }
+
+            const storedProfileKey = String(parsed?.profileKey || '');
+            if (retainedProfileKey && storedProfileKey !== retainedProfileKey) {
+                sessionStorage.removeItem(SETTINGS.sessionKey);
+                return;
+            }
+
+            retainedProfileKey = storedProfileKey || retainedProfileKey;
+            const items = Array.isArray(parsed?.items) ? parsed.items : [];
+            for (const item of items) {
                 if (item?.key && item?.fullUrl) retainedImages.set(item.key, item);
             }
         } catch (error) {
@@ -1423,6 +1448,29 @@
         retainedImages.clear();
         try { sessionStorage.removeItem(SETTINGS.sessionKey); } catch (_) { /* ignore */ }
         updateMainButtonIdle();
+    }
+
+    function currentRetentionProfileKey() {
+        const profileRoute = currentProfileRoute();
+        if (!profileRoute?.type || !profileRoute?.value) return '';
+        return `${profileRoute.type}:${String(profileRoute.value).toLowerCase()}`;
+    }
+
+    function ensureRetainedProfileScope() {
+        const nextProfileKey = currentRetentionProfileKey();
+        // Photo viewers and other routes do not identify their owning profile
+        // reliably. Keep the current scope until a definite profile appears.
+        if (!nextProfileKey) return false;
+        if (!retainedProfileKey) {
+            retainedProfileKey = nextProfileKey;
+            return false;
+        }
+        if (retainedProfileKey === nextProfileKey) return false;
+
+        retainedProfileKey = nextProfileKey;
+        retainedImages.clear();
+        try { sessionStorage.removeItem(SETTINGS.sessionKey); } catch (_) { /* ignore */ }
+        return true;
     }
 
     function loadDownloadHistory() {
@@ -1826,6 +1874,8 @@
             setMainButton(`Stopping scan… ${retainedImages.size} retained`, false, 'progress');
             return;
         }
+
+        ensureRetainedProfileScope();
 
         scanning = true;
         stopScanRequested = false;
@@ -3885,7 +3935,11 @@
     }
 
     function addMainButton() {
-        if (document.getElementById(IDS.button)) return;
+        const profileChanged = ensureRetainedProfileScope();
+        if (document.getElementById(IDS.button)) {
+            if (profileChanged) updateMainButtonIdle();
+            return;
+        }
 
         const container = document.createElement('div');
         container.id = IDS.container;

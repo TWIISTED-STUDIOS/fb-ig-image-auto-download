@@ -23,17 +23,23 @@ function loadUserscriptHooks() {
         clampLauncherPosition,
         assertFacebookPageUrl,
         extractPhotoId,
+        ensureRetainedProfileScope,
         facebookPhotoId,
         findPhotoLink,
         filenameIdentifier,
         historyIdForItem,
         isFacebookPageUrl,
         matchingExistingFilename,
-        readFolderInventory
+        persistRetainedImages,
+        readFolderInventory,
+        retainedImageCount: () => retainedImages.size,
+        retainedProfileKey: () => retainedProfileKey,
+        retainTestImage: item => retainedImages.set(item.key, item)
     });`);
   assert.notEqual(instrumented, source, 'Userscript startup marker changed; update the test harness.');
 
   const hooks = {};
+  const sessionValues = new Map();
   const context = vm.createContext({
     URL,
     URLSearchParams,
@@ -41,13 +47,18 @@ function loadUserscriptHooks() {
     location: new URL('https://www.facebook.com/example/photos'),
     GM_addStyle() {},
     GM_getValue() { return null; },
+    sessionStorage: {
+      getItem(key) { return sessionValues.get(key) ?? null; },
+      setItem(key, value) { sessionValues.set(key, String(value)); },
+      removeItem(key) { sessionValues.delete(key); }
+    },
     __fbfrTestHooks: hooks
   });
   new vm.Script(instrumented, { filename: path.basename(scriptPath) }).runInContext(context);
-  return hooks;
+  return { context, hooks, sessionValues };
 }
 
-const hooks = loadUserscriptHooks();
+const { context, hooks, sessionValues } = loadUserscriptHooks();
 
 test('numeric owner and photo path segments use the photo ID', () => {
   const firstUrl = 'https://www.facebook.com/photos/123456789/987654321/';
@@ -116,4 +127,29 @@ test('launcher positions are clamped inside the current viewport', () => {
   assertPosition(hooks.clampLauncherPosition(900, 700, 800, 600, 120, 80), 680, 520);
   assertPosition(hooks.clampLauncherPosition(-20, -30, 800, 600, 120, 80), 0, 0);
   assertPosition(hooks.clampLauncherPosition(100, 100, 80, 60, 120, 80), 0, 0);
+});
+
+test('retained images merge within one profile and clear on a different profile', () => {
+  context.location.href = 'https://www.facebook.com/first.profile/photos';
+  assert.equal(hooks.ensureRetainedProfileScope(), false);
+  assert.equal(hooks.retainedProfileKey(), 'path:/first.profile');
+
+  hooks.retainTestImage({ key: 'photo:111111', fullUrl: 'https://example.fbcdn.net/first.jpg' });
+  hooks.persistRetainedImages();
+  assert.equal(hooks.retainedImageCount(), 1);
+  assert.equal(JSON.parse([...sessionValues.values()][0]).profileKey, 'path:/first.profile');
+
+  context.location.href = 'https://www.facebook.com/First.Profile/albums';
+  assert.equal(hooks.ensureRetainedProfileScope(), false);
+  assert.equal(hooks.retainedImageCount(), 1);
+
+  context.location.href = 'https://www.facebook.com/photo.php?fbid=111111';
+  assert.equal(hooks.ensureRetainedProfileScope(), false);
+  assert.equal(hooks.retainedImageCount(), 1);
+
+  context.location.href = 'https://www.facebook.com/second.profile/photos';
+  assert.equal(hooks.ensureRetainedProfileScope(), true);
+  assert.equal(hooks.retainedProfileKey(), 'path:/second.profile');
+  assert.equal(hooks.retainedImageCount(), 0);
+  assert.equal(sessionValues.size, 0);
 });
