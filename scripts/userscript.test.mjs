@@ -21,11 +21,16 @@ function loadUserscriptHooks() {
   const instrumented = source.replace(startup, `    Object.assign(globalThis.__fbfrTestHooks, {
         canonicalSourceKey,
         clampLauncherPosition,
+        cleanAccountNameCandidate,
+        currentProfilePhotoCollectionKey,
         assertFacebookPageUrl,
+        detectAccountName,
         extractPhotoId,
         ensureRetainedProfileScope,
         facebookPhotoId,
+        feedAuthorUrlScore,
         findPhotoLink,
+        filenameBase,
         filenameIdentifier,
         historyIdForItem,
         isFacebookPageUrl,
@@ -59,6 +64,21 @@ function loadUserscriptHooks() {
 }
 
 const { context, hooks, sessionValues } = loadUserscriptHooks();
+
+test('group member routes identify post authors without accepting the group itself', () => {
+  assert.equal(hooks.feedAuthorUrlScore('/groups/1679271875623926/'), 0);
+  assert.equal(
+    hooks.feedAuthorUrlScore('/groups/1679271875623926/user/100029511827848/'),
+    85
+  );
+  assert.equal(hooks.feedAuthorUrlScore('/groups/1679271875623926/posts/987654321/'), 0);
+});
+
+test('retained group-post authors override generic Facebook page metadata', () => {
+  context.location.href = 'https://www.facebook.com/groups/1478956207177168/';
+  assert.equal(hooks.detectAccountName([{ accountName: 'Emerald Green' }]), 'Emerald Green');
+  context.location.href = 'https://www.facebook.com/example/photos';
+});
 
 test('numeric owner and photo path segments use the photo ID', () => {
   const firstUrl = 'https://www.facebook.com/photos/123456789/987654321/';
@@ -152,4 +172,33 @@ test('retained images merge within one profile and clear on a different profile'
   assert.equal(hooks.retainedProfileKey(), 'path:/second.profile');
   assert.equal(hooks.retainedImageCount(), 0);
   assert.equal(sessionValues.size, 0);
+});
+
+test('profile photo collection routes are distinguished from feeds and other profile tabs', () => {
+  context.location.href = 'https://www.facebook.com/first.profile/photos';
+  assert.equal(hooks.currentProfilePhotoCollectionKey(), 'path:/first.profile:photos');
+
+  context.location.href = 'https://www.facebook.com/first.profile/posts';
+  assert.equal(hooks.currentProfilePhotoCollectionKey(), '');
+
+  context.location.href = 'https://www.facebook.com/first.profile/photos/987654321';
+  assert.equal(hooks.currentProfilePhotoCollectionKey(), '');
+
+  context.location.href = 'https://www.facebook.com/';
+  assert.equal(hooks.currentProfilePhotoCollectionKey(), '');
+
+  context.location.href = 'https://www.facebook.com/profile.php?id=123456789&sk=photos';
+  assert.equal(hooks.currentProfilePhotoCollectionKey(), 'id:123456789:photos');
+});
+
+test('symbol-only UI controls cannot become filename prefixes', () => {
+  const item = { key: 'photo:987654321', sourceUrl: 'https://www.facebook.com/photo.php?fbid=987654321' };
+
+  assert.equal(hooks.cleanAccountNameCandidate('💾'), '');
+  assert.equal(hooks.cleanAccountNameCandidate('Reply'), '');
+  assert.equal(hooks.cleanAccountNameCandidate('See more'), '');
+  assert.equal(hooks.cleanAccountNameCandidate('(4) Facebook'), '');
+  assert.equal(hooks.cleanAccountNameCandidate('(12) Test Profile | Facebook'), 'Test Profile');
+  assert.match(hooks.filenameBase(item, 1, 1, '💾'), /^Facebook-/);
+  assert.match(hooks.filenameBase(item, 1, 1, 'Test Profile'), /^Test Profile-/);
 });

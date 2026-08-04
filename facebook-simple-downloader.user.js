@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Facebook Image Downloader - Verified Full Resolution
 // @namespace    https://github.com/TWIISTED-STUDIOS/fb-ig-image-auto-download
-// @version      1.0.3
+// @version      1.0.4
 // @description  Deep-scan Facebook photos, resolve verified maximum-resolution files, check a chosen folder for existing images, and download individually or in bulk.
 // @author       Bibek Chand Sah (original project); TWIISTED-STUDIOS contributors (maintained rewrite)
 // @homepageURL  https://github.com/TWIISTED-STUDIOS/fb-ig-image-auto-download
@@ -51,7 +51,7 @@
         minimumRenderedSide: 80,
         scrollStepRatio: 0.88,
         pickerId: 'fb-fullres-download',
-        sessionKey: 'fbfr-photo-window-v0.6.1-manifest',
+        sessionKey: 'fbfr-photo-window-v1.0.4-beta.4-manifest',
         resolverWindowName: 'fbFullResResolver',
         resolverTimeoutMs: 45000,
         resolverPollMs: 350,
@@ -531,7 +531,9 @@
         .fbfr-inline-download[data-success="true"] { background: rgba(5,150,105,.92); }
         @keyframes fbfr-pulse { 50% { transform: scale(.92); opacity: .72; } }
 
-        .fbfr-inline-host { position: relative !important; }
+        /* Supply a containing block only when Facebook has not defined one.
+           Zero specificity ensures its feed layout rules always win. */
+        :where(.fbfr-inline-host) { position: relative; }
         .fbfr-inline-download {
             position: absolute;
             top: 10px;
@@ -1236,9 +1238,31 @@
         return '';
     }
 
+    function isExcludedProfileUtilityImage(img) {
+        const excludedHeading = /^(?:check-?ins?|events?|reviews?(?: given)?)$/i;
+        const excludedRoute = /\/(?:map|events|past_events|reviews_given|reviews_written|place_reviews_written)\/?$/i;
+        let scope = img.parentElement;
+        for (let depth = 0; scope && depth < 16; depth += 1, scope = scope.parentElement) {
+            if (scope.matches('main, [role="main"], body')) break;
+            for (const heading of scope.querySelectorAll('h2')) {
+                const label = String(heading.textContent || '').replace(/\s+/g, ' ').trim();
+                const headingLink = heading.querySelector('a[href]');
+                let routeExcluded = false;
+                try {
+                    routeExcluded = excludedRoute.test(new URL(headingLink?.href || '', location.href).pathname);
+                } catch (_) {
+                    // The visible semantic heading remains sufficient.
+                }
+                if (excludedHeading.test(label) || routeExcluded) return true;
+            }
+        }
+        return false;
+    }
+
     function isLikelyContentPhoto(img, fullUrl) {
         if (!isFacebookImageUrl(fullUrl)) return false;
         if (img.closest(`#${IDS.overlay}, nav, [role="navigation"], [role="banner"]`)) return false;
+        if (isExcludedProfileUtilityImage(img)) return false;
 
         const { width, height } = getRenderedSize(img);
         const photoLink = findPhotoLink(img);
@@ -1248,6 +1272,14 @@
         // when the currently rendered thumbnail is small.
         if (photoLink) return true;
         if (width < SETTINGS.minimumRenderedSide && height < SETTINGS.minimumRenderedSide) return false;
+
+        // Non-photo-linked images in profile cards are commonly avatars,
+        // event thumbnails, place icons, or review logos rather than entries
+        // from the person's photo library.
+        const rect = img.getBoundingClientRect();
+        const displayedWidth = Math.max(rect.width || 0, Number(img.getAttribute('width')) || 0);
+        const displayedHeight = Math.max(rect.height || 0, Number(img.getAttribute('height')) || 0);
+        if (displayedWidth < 160 && displayedHeight < 160) return false;
 
         const alt = String(img.alt || img.getAttribute('aria-label') || '').toLowerCase();
         if (/emoji|icon|logo|sticker|reaction/.test(alt) && largestSide < 420) return false;
@@ -1315,6 +1347,91 @@
         return text.length > 110 ? `${text.slice(0, 109).trim()}…` : text;
     }
 
+    function feedAuthorUrlScore(value) {
+        try {
+            const parsed = new URL(value, location.href);
+            if (!/^(?:www\.|m\.)?facebook\.com$/i.test(parsed.hostname)) return 0;
+            const segments = parsed.pathname.split('/').filter(Boolean).map(segment => decodeURIComponent(segment).toLowerCase());
+            const first = segments[0] || '';
+            if (first === 'profile.php' && parsed.searchParams.get('id')) return 80;
+            if (first === 'people' && segments.length >= 3) return 80;
+            if (first === 'pages' && segments.length >= 3) return 70;
+            // Group posts show the group itself as the primary heading, then
+            // identify the actual poster with /groups/{group-id}/user/{user-id}/.
+            // Accept only that explicit member route so the group name cannot
+            // become the downloaded file prefix.
+            if (first === 'groups' && segments[1] && segments[2] === 'user' && segments[3]) return 85;
+            const reserved = new Set([
+                'events', 'groups', 'marketplace', 'photo.php', 'photos', 'posts',
+                'reel', 'reels', 'share', 'story.php', 'watch'
+            ]);
+            if (segments.length === 1 && !reserved.has(first)) return 75;
+        } catch (_) {
+            // Ignore malformed or non-Facebook author links.
+        }
+        return 0;
+    }
+
+    function feedAuthorLinkScore(anchor) {
+        if (!(anchor instanceof HTMLAnchorElement)) return 0;
+        return feedAuthorUrlScore(anchor.href);
+    }
+
+    function findFeedPostScope(img) {
+        const article = img.closest('[role="article"], article');
+        if (article instanceof HTMLElement) return article;
+
+        // Some group-feed cards no longer expose role=article. Walk only as far
+        // as the surrounding main feed and select the nearest wrapper that
+        // contains Facebook's explicit post-author signals. Stopping at the
+        // first such wrapper prevents an author from a neighbouring post being
+        // used when several cards share the same feed container.
+        let scope = img.parentElement;
+        while (scope instanceof HTMLElement && !scope.matches('main, [role="main"], body')) {
+            if (scope.querySelector(
+                'a[href*="/groups/"][href*="/user/"], [aria-label^="Actions for this post by "], [aria-label^="Hide post by "]'
+            )) {
+                return scope;
+            }
+            scope = scope.parentElement;
+        }
+        return null;
+    }
+
+    function findFeedPostAuthor(img) {
+        const article = findFeedPostScope(img);
+        if (!(article instanceof HTMLElement)) return '';
+        const imageRect = img.getBoundingClientRect();
+        const candidates = [];
+        const seen = new Set();
+        const push = (value, score) => {
+            const name = cleanAccountNameCandidate(value);
+            if (!name || seen.has(name.toLowerCase())) return;
+            seen.add(name.toLowerCase());
+            candidates.push({ name, score });
+        };
+        for (const anchor of article.querySelectorAll('h1 a[href], h2 a[href], h3 a[href], strong a[href], a[role="link"][href]')) {
+            if (anchor.contains(img) || !visibleElement(anchor)) continue;
+            const linkScore = feedAuthorLinkScore(anchor);
+            if (!linkScore) continue;
+            const name = cleanAccountNameCandidate(accountNameTextFromElement(anchor) || anchor.getAttribute('aria-label'));
+            if (!name) continue;
+            const rect = anchor.getBoundingClientRect();
+            let score = linkScore;
+            if (anchor.closest('h1, h2, h3, [role="heading"]')) score += 90;
+            else if (anchor.closest('strong')) score += 55;
+            if (rect.top <= imageRect.top + 8) score += 25;
+            push(name, score);
+        }
+        for (const element of article.querySelectorAll('[aria-label^="Actions for this post by "], [aria-label^="Hide post by "]')) {
+            const label = element.getAttribute('aria-label') || '';
+            const match = label.match(/^(?:Actions for this post by|Hide post by)\s+(.+)$/i);
+            if (match) push(match[1], 95);
+        }
+        candidates.sort((a, b) => b.score - a.score);
+        return candidates[0]?.name || '';
+    }
+
     function captureImageElement(img, imageMap) {
         if (!(img instanceof HTMLImageElement)) return { added: 0, upgraded: 0 };
 
@@ -1337,6 +1454,7 @@
             candidateUrls: extracted.candidateUrls,
             width: Math.round(size.width),
             height: Math.round(size.height),
+            accountName: findFeedPostAuthor(img),
             description: cleanDescription(img.alt || img.getAttribute('aria-label') || '')
         };
 
@@ -1353,10 +1471,19 @@
             imageMap.set(key, {
                 ...existing,
                 ...item,
+                accountName: item.accountName || existing.accountName,
                 description: item.description || existing.description,
                 sourceUrl: item.sourceUrl || existing.sourceUrl,
                 candidateUrls: Array.from(new Set([...(item.candidateUrls || []), ...(existing.candidateUrls || [])])).slice(0, 30)
             });
+            return { added: 0, upgraded: 1 };
+        }
+
+        // Older retained manifests may contain this same rendition without the
+        // post author. Backfill newly discovered author metadata even when the
+        // image URL/resolution itself does not need an upgrade.
+        if (item.accountName && item.accountName !== existing.accountName) {
+            imageMap.set(key, { ...existing, accountName: item.accountName });
             return { added: 0, upgraded: 1 };
         }
 
@@ -1708,7 +1835,7 @@
 
         try {
             const asset = await resolveVerifiedBackgroundAsset(item);
-            const prefix = detectAccountName([item]);
+            const prefix = cleanAccountNameCandidate(item.accountName) || detectAccountName([item]);
             const base = filenameBase(item, 1, 1, prefix);
             const extension = extensionForContentType(asset.fetched.contentType, asset.url);
             const filename = `${base}.${extension}`;
@@ -1751,13 +1878,15 @@
 
         const item = itemFromImageElement(img);
         if (!item?.sourceUrl) {
-            inlineProcessedImages.add(img);
+            // Facebook frequently inserts an empty img before assigning its
+            // lazy src/srcset. Leave it eligible so the attribute observer can
+            // retry it when the real photo source arrives.
             return false;
         }
 
         const host = img.closest('a[href]') || img.parentElement;
         if (!(host instanceof HTMLElement) || !host.contains(img)) {
-            inlineProcessedImages.add(img);
+            // Reparented virtual-grid images may gain a valid host later.
             return false;
         }
         if (host.querySelector(':scope > .fbfr-inline-download')) {
@@ -1798,18 +1927,23 @@
 
     function startInlineDownloadMonitoring() {
         scanForInlineDownloadIcons();
+        const pendingRoots = new Set();
+        const flushPendingRoots = () => {
+            const roots = Array.from(pendingRoots);
+            pendingRoots.clear();
+            for (const root of roots) scanForInlineDownloadIcons(root);
+        };
         const observer = new MutationObserver(mutations => {
-            window.clearTimeout(inlineScanTimer);
-            inlineScanTimer = window.setTimeout(() => {
-                for (const mutation of mutations) {
-                    if (mutation.type === 'attributes' && mutation.target instanceof HTMLImageElement) {
-                        addInlineDownloadIcon(mutation.target);
-                    }
-                    for (const node of mutation.addedNodes || []) {
-                        if (node instanceof Element) scanForInlineDownloadIcons(node);
-                    }
+            for (const mutation of mutations) {
+                if (mutation.type === 'attributes' && mutation.target instanceof HTMLImageElement) {
+                    pendingRoots.add(mutation.target);
                 }
-            }, 400);
+                for (const node of mutation.addedNodes || []) {
+                    if (node instanceof Element) pendingRoots.add(node);
+                }
+            }
+            window.clearTimeout(inlineScanTimer);
+            inlineScanTimer = window.setTimeout(flushPendingRoots, 400);
         });
         observer.observe(document.documentElement, {
             childList: true,
@@ -1817,7 +1951,6 @@
             attributes: true,
             attributeFilter: ['src', 'srcset', 'data-src', 'data-srcset']
         });
-        window.setInterval(scanForInlineDownloadIcons, 5000);
     }
 
     function setMainButton(text, disabled = false, scanState = scanning ? 'progress' : 'idle', stallCount = 0) {
@@ -1867,6 +2000,71 @@
         setMainButton(`Scan images${retainedText}`, false);
     }
 
+    function currentProfilePhotoCollectionKey() {
+        const profileKey = currentRetentionProfileKey();
+        if (!profileKey) return '';
+        try {
+            const parsed = new URL(location.href);
+            const segments = parsed.pathname.split('/').filter(Boolean).map(segment => decodeURIComponent(segment).toLowerCase());
+            const first = segments[0] || '';
+            let collection = '';
+            if (first === 'profile.php') {
+                collection = String(parsed.searchParams.get('sk') || '').toLowerCase();
+            } else {
+                const profileRoute = currentProfileRoute();
+                const profileDepth = String(profileRoute?.value || '').split('/').filter(Boolean).length;
+                if (segments.length !== profileDepth + 1) return '';
+                collection = segments[profileDepth] || '';
+            }
+            if (!/^(?:photos?|photos_by|photos_of|photos_albums|albums)$/.test(collection)) return '';
+            return `${profileKey}:${collection}`;
+        } catch (_) {
+            return '';
+        }
+    }
+
+    function profilePhotoCollectionReady() {
+        if (!currentProfilePhotoCollectionKey()) return true;
+        const main = document.querySelector('[role="main"], main');
+        if (!(main instanceof Element)) return false;
+
+        // The normal feed has no profile-level H1. Waiting for one prevents a
+        // /photos URL change from capturing the feed DOM that Facebook has not
+        // replaced yet.
+        for (const heading of main.querySelectorAll('h1, [role="heading"][aria-level="1"]')) {
+            if (visibleElement(heading) && cleanAccountNameCandidate(accountNameTextFromElement(heading))) {
+                return true;
+            }
+        }
+
+        const profileRoute = currentProfileRoute();
+        for (const anchor of main.querySelectorAll('a[href]')) {
+            if (!visibleElement(anchor) || !anchorMatchesCurrentProfile(anchor, profileRoute)) continue;
+            const fontSize = Number.parseFloat(getComputedStyle(anchor).fontSize) || 0;
+            if (fontSize >= 20 || anchor.closest('h1, [role="heading"][aria-level="1"]')) return true;
+        }
+        for (const button of main.querySelectorAll('div[role="button"][tabindex="0"]')) {
+            if (!visibleElement(button) || !directElementText(button)) continue;
+            const fontSize = Number.parseFloat(getComputedStyle(button).fontSize) || 0;
+            if (fontSize >= 22) return true;
+        }
+        return false;
+    }
+
+    async function waitForProfilePhotoCollectionReady(timeoutMs = 15000) {
+        const collectionKey = currentProfilePhotoCollectionKey();
+        if (!collectionKey) return true;
+        const deadline = Date.now() + timeoutMs;
+        let stableChecks = 0;
+        while (Date.now() < deadline) {
+            if (currentProfilePhotoCollectionKey() !== collectionKey) return false;
+            stableChecks = profilePhotoCollectionReady() ? stableChecks + 1 : 0;
+            if (stableChecks >= 2) return true;
+            await sleep(250);
+        }
+        return false;
+    }
+
     async function scanPage({ clearFirst = false } = {}) {
         if (downloading) return;
         if (scanning) {
@@ -1892,7 +2090,17 @@
         try {
             // Start at the top so virtualised album tiles are seen in order.
             window.scrollTo({ top: 0, behavior: 'auto' });
+            const startingCollectionKey = currentProfilePhotoCollectionKey();
+            if (startingCollectionKey && !await waitForProfilePhotoCollectionReady()) {
+                throw new Error('Facebook has not finished loading this profile Photos page. Wait for the profile header and photo grid to appear, then scan again.');
+            }
             await sleep(SETTINGS.initialDelayMs);
+            if (startingCollectionKey && (
+                currentProfilePhotoCollectionKey() !== startingCollectionKey ||
+                !profilePhotoCollectionReady()
+            )) {
+                throw new Error('The profile Photos page changed while the scan was starting. Wait for it to finish loading, then scan again.');
+            }
             // Capture the filename prefix while the profile header is definitely
             // on screen. Facebook may virtualise that header out of the DOM by
             // the time a long scan reaches the bottom.
@@ -2021,13 +2229,15 @@
     const GENERIC_FACEBOOK_ACCOUNT_LABELS = new Set([
         'about', 'account', 'accounts', 'all photos', 'albums', 'chat', 'chats', 'check-ins', 'checkins',
         'add friend', 'create story', 'events', 'facebook', 'feeds', 'follow', 'friends', 'gaming',
-        'groups', 'home', 'like', 'log in', 'marketplace', 'menu', 'message', 'messages',
-        'messenger', 'more', 'notifications', 'photos', 'posts', 'profile',
-        'reels', 'search', 'settings', 'stories', 'videos', 'watch', 'your profile'
+        'comment', 'groups', 'home', 'like', 'log in', 'marketplace', 'menu', 'message', 'messages',
+        'messenger', 'more', 'notifications', 'photos', 'posts', 'profile', 'reply',
+        'reels', 'save', 'see more', 'send', 'share', 'search', 'settings', 'stories',
+        'videos', 'view more comments', 'watch', 'write a comment', 'your profile'
     ]);
 
     function cleanAccountNameCandidate(value) {
         let text = String(value || '')
+            .replace(/^\(\s*\d+\s*\)\s*/, '')
             .replace(/\s*[|·-]\s*Facebook\s*$/i, '')
             .replace(/^Facebook\s*[|·-]\s*/i, '')
             .replace(/^Photos\s+of\s+/i, '')
@@ -2041,6 +2251,7 @@
         text = sanitizeFilenamePart(text);
         const normalized = text.toLowerCase();
         if (!text || text.length > 70) return '';
+        if (!/[\p{L}\p{N}]/u.test(text)) return '';
         if (GENERIC_FACEBOOK_ACCOUNT_LABELS.has(normalized)) return '';
         if (/^(?:chat|chats|messages|notifications)(?:\s*\(.*\)|\s*\d+)?$/i.test(text)) return '';
         if (/^(?:facebook|meta)\b/i.test(text)) return '';
@@ -2169,6 +2380,7 @@
         for (const element of document.querySelectorAll(
             '[role="main"] div[role="button"][tabindex="0"], main div[role="button"][tabindex="0"]'
         )) {
+            if (element.closest(`#${IDS.container}, #${IDS.overlay}, .fbfr-inline-download`)) continue;
             if (!visibleElement(element)) continue;
             const value = directElementText(element);
             if (!value) continue;
@@ -2176,9 +2388,11 @@
             if (rect.height > 110 || rect.width > Math.max(760, window.innerWidth * 0.75)) continue;
             const style = getComputedStyle(element);
             const fontSize = Number.parseFloat(style.fontSize) || 0;
+            const insideHeading = Boolean(element.closest('h1, h2, [role="heading"]'));
+            if (fontSize < 20 && !insideHeading) continue;
             let score = 72;
             if (element.closest('[role="main"], main')) score += 22;
-            if (element.closest('h1, h2, [role="heading"]')) score += 35;
+            if (insideHeading) score += 35;
             if (fontSize >= 28) score += 75;
             else if (fontSize >= 22) score += 52;
             else if (fontSize >= 18) score += 24;
@@ -2198,8 +2412,16 @@
         ]) {
             for (const element of document.querySelectorAll(selector)) {
                 if (!visibleElement(element)) continue;
+                const fontSize = Number.parseFloat(getComputedStyle(element).fontSize) || 0;
+                if (selector.includes('h2')) {
+                    const linksCurrentProfile = Boolean(profileRoute) && Array.from(element.querySelectorAll('a[href]'))
+                        .some(anchor => anchorMatchesCurrentProfile(anchor, profileRoute));
+                    if (!linksCurrentProfile && fontSize < 28) continue;
+                }
                 let score = 100;
                 if (selector.includes('h1')) score += 35;
+                if (fontSize >= 24) score += 35;
+                else if (fontSize >= 20) score += 18;
                 if (element.closest('[role="main"], main')) score += 25;
                 if (element.querySelector('a[href]')) score += 8;
                 push(accountNameTextFromElement(element), `profile heading: ${selector}`, element, score);
@@ -2249,6 +2471,25 @@
 
     function detectAccountName(images = []) {
         const profileRoute = currentProfileRoute();
+
+        // Feed and group captures already retain the author beside each image.
+        // Prefer that post-local evidence over page metadata: group routes often
+        // have the generic title "Facebook", while their visible header names
+        // the group rather than the member who posted the photo.
+        const retainedAuthors = new Map();
+        for (const item of images) {
+            const author = cleanAccountNameCandidate(item?.accountName);
+            if (!author) continue;
+            const key = author.toLowerCase();
+            const existing = retainedAuthors.get(key);
+            retainedAuthors.set(key, {
+                value: existing?.value || author,
+                count: (existing?.count || 0) + 1
+            });
+        }
+        const retainedAuthor = Array.from(retainedAuthors.values())
+            .sort((a, b) => b.count - a.count)[0]?.value;
+        if (retainedAuthor) return cacheAccountName(retainedAuthor, profileRoute);
 
         // Use the visible profile heading before document metadata. Facebook's
         // metadata can become stale during SPA navigation and may contain a tab
@@ -2328,7 +2569,7 @@
     }
 
     function filenameBase(item, position, total, requestedPrefix) {
-        const prefix = sanitizeFilenamePart(requestedPrefix).slice(0, 70) || 'Facebook';
+        const prefix = cleanAccountNameCandidate(requestedPrefix).slice(0, 70) || 'Facebook';
         const identifier = filenameIdentifier(item, position, total);
         return `${prefix}-${identifier}`.slice(0, 150);
     }
