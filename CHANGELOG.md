@@ -6,6 +6,7 @@ All notable changes to the maintained Facebook downloader are documented here.
 
 ### Fixed
 
+- Ignore Reply, See more, and other post actions when naming no-scan individual downloads
 - Prevent the inline 💾 control from becoming an individual-download filename prefix
 - Exclude Check-ins, Events, and Reviews utility-module thumbnails from photo scans
 - Wait for Facebook to replace stale feed content before capturing a profile Photos page

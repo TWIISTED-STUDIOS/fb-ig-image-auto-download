@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Facebook Image Downloader - Verified Full Resolution
 // @namespace    https://github.com/TWIISTED-STUDIOS/fb-ig-image-auto-download
-// @version      1.0.4-beta.5
+// @version      1.0.4-beta.6
 // @description  Deep-scan Facebook photos, resolve verified maximum-resolution files, check a chosen folder for existing images, and download individually or in bulk.
 // @author       Bibek Chand Sah (original project); TWIISTED-STUDIOS contributors (maintained rewrite)
 // @homepageURL  https://github.com/TWIISTED-STUDIOS/fb-ig-image-auto-download
@@ -2134,9 +2134,10 @@
     const GENERIC_FACEBOOK_ACCOUNT_LABELS = new Set([
         'about', 'account', 'accounts', 'all photos', 'albums', 'chat', 'chats', 'check-ins', 'checkins',
         'add friend', 'create story', 'events', 'facebook', 'feeds', 'follow', 'friends', 'gaming',
-        'groups', 'home', 'like', 'log in', 'marketplace', 'menu', 'message', 'messages',
-        'messenger', 'more', 'notifications', 'photos', 'posts', 'profile',
-        'reels', 'search', 'settings', 'stories', 'videos', 'watch', 'your profile'
+        'comment', 'groups', 'home', 'like', 'log in', 'marketplace', 'menu', 'message', 'messages',
+        'messenger', 'more', 'notifications', 'photos', 'posts', 'profile', 'reply',
+        'reels', 'save', 'see more', 'send', 'share', 'search', 'settings', 'stories',
+        'videos', 'view more comments', 'watch', 'write a comment', 'your profile'
     ]);
 
     function cleanAccountNameCandidate(value) {
@@ -2291,9 +2292,11 @@
             if (rect.height > 110 || rect.width > Math.max(760, window.innerWidth * 0.75)) continue;
             const style = getComputedStyle(element);
             const fontSize = Number.parseFloat(style.fontSize) || 0;
+            const insideHeading = Boolean(element.closest('h1, h2, [role="heading"]'));
+            if (fontSize < 20 && !insideHeading) continue;
             let score = 72;
             if (element.closest('[role="main"], main')) score += 22;
-            if (element.closest('h1, h2, [role="heading"]')) score += 35;
+            if (insideHeading) score += 35;
             if (fontSize >= 28) score += 75;
             else if (fontSize >= 22) score += 52;
             else if (fontSize >= 18) score += 24;
@@ -2313,8 +2316,16 @@
         ]) {
             for (const element of document.querySelectorAll(selector)) {
                 if (!visibleElement(element)) continue;
+                const fontSize = Number.parseFloat(getComputedStyle(element).fontSize) || 0;
+                if (selector.includes('h2')) {
+                    const linksCurrentProfile = Boolean(profileRoute) && Array.from(element.querySelectorAll('a[href]'))
+                        .some(anchor => anchorMatchesCurrentProfile(anchor, profileRoute));
+                    if (!linksCurrentProfile && fontSize < 28) continue;
+                }
                 let score = 100;
                 if (selector.includes('h1')) score += 35;
+                if (fontSize >= 24) score += 35;
+                else if (fontSize >= 20) score += 18;
                 if (element.closest('[role="main"], main')) score += 25;
                 if (element.querySelector('a[href]')) score += 8;
                 push(accountNameTextFromElement(element), `profile heading: ${selector}`, element, score);
