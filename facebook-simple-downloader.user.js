@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Facebook Image Downloader - Verified Full Resolution
 // @namespace    https://github.com/TWIISTED-STUDIOS/fb-ig-image-auto-download
-// @version      1.0.4-beta.9
+// @version      1.0.4-beta.10
 // @description  Deep-scan Facebook photos, resolve verified maximum-resolution files, check a chosen folder for existing images, and download individually or in bulk.
 // @author       Bibek Chand Sah (original project); TWIISTED-STUDIOS contributors (maintained rewrite)
 // @homepageURL  https://github.com/TWIISTED-STUDIOS/fb-ig-image-auto-download
@@ -1476,6 +1476,14 @@
                 sourceUrl: item.sourceUrl || existing.sourceUrl,
                 candidateUrls: Array.from(new Set([...(item.candidateUrls || []), ...(existing.candidateUrls || [])])).slice(0, 30)
             });
+            return { added: 0, upgraded: 1 };
+        }
+
+        // Older retained manifests may contain this same rendition without the
+        // post author. Backfill newly discovered author metadata even when the
+        // image URL/resolution itself does not need an upgrade.
+        if (item.accountName && item.accountName !== existing.accountName) {
+            imageMap.set(key, { ...existing, accountName: item.accountName });
             return { added: 0, upgraded: 1 };
         }
 
