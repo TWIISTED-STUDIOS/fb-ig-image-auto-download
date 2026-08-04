@@ -27,6 +27,7 @@ function loadUserscriptHooks() {
         extractPhotoId,
         ensureRetainedProfileScope,
         facebookPhotoId,
+        feedAuthorUrlScore,
         findPhotoLink,
         filenameBase,
         filenameIdentifier,
@@ -62,6 +63,15 @@ function loadUserscriptHooks() {
 }
 
 const { context, hooks, sessionValues } = loadUserscriptHooks();
+
+test('group member routes identify post authors without accepting the group itself', () => {
+  assert.equal(hooks.feedAuthorUrlScore('/groups/1679271875623926/'), 0);
+  assert.equal(
+    hooks.feedAuthorUrlScore('/groups/1679271875623926/user/100029511827848/'),
+    85
+  );
+  assert.equal(hooks.feedAuthorUrlScore('/groups/1679271875623926/posts/987654321/'), 0);
+});
 
 test('numeric owner and photo path segments use the photo ID', () => {
   const firstUrl = 'https://www.facebook.com/photos/123456789/987654321/';

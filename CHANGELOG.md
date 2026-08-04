@@ -6,6 +6,7 @@ All notable changes to the maintained Facebook downloader are documented here.
 
 ### Fixed
 
+- Use the member name, rather than Facebook or the group name, for group-post individual-download filenames
 - Use the nearest news-feed post author for no-scan individual-download filenames
 - Strip unread-notification counts such as `(4)` from Facebook tab-title fallbacks
 - Ignore Reply, See more, and other post actions when naming no-scan individual downloads
@@ -22,6 +23,7 @@ All notable changes to the maintained Facebook downloader are documented here.
 
 ### Tests
 
+- Add regression coverage for Facebook group-member author links
 - Add Playwright coverage for initial, lazy, and rapidly inserted images plus launcher interaction
 
 ## 1.0.3 - 2026-08-03
