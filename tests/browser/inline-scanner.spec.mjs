@@ -6,6 +6,10 @@ import { fileURLToPath } from 'node:url';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '../..');
 const userscript = fs.readFileSync(path.join(root, 'facebook-simple-downloader.user.js'), 'utf8');
+const startupMarker = '    loadRetainedImages();';
+const noScanUserscript = userscript.replace(startupMarker, `    unsafeWindow.__fbfrNoScanFilename = item =>
+        filenameBase(item, 1, 1, detectAccountName([item]));
+${startupMarker}`);
 
 function fixtureHtml() {
   const images = Array.from({ length: 20 }, (_, index) => `
@@ -43,6 +47,19 @@ function transitionFixtureHtml() {
       <a href="/photos/999999999/888888888/">
         <img src="https://scontent.example.fbcdn.net/feed-before-navigation.jpg"
              alt="Feed photo that must not be retained" style="width:320px;height:220px">
+      </a>
+    </main>
+  </body></html>`;
+}
+
+function noScanFixtureHtml() {
+  return `<!doctype html><html><head><title>Test Profile | Facebook</title></head><body>
+    <main role="main">
+      <div role="button" tabindex="0" style="width:100px;height:24px">Reply</div>
+      <div role="button" tabindex="0" style="width:100px;height:24px">See more</div>
+      <a href="/test.profile/photos/123456789/">
+        <img src="https://scontent.example.fbcdn.net/no-scan-photo.jpg"
+             alt="No-scan profile photo" style="width:320px;height:220px">
       </a>
     </main>
   </body></html>`;
@@ -121,6 +138,27 @@ test('processes lazy and rapid image mutations without periodic document sweeps'
   await page.waitForTimeout(5_200);
   expect(await page.evaluate(() => window.__fbfrBrowserMetrics.fullDocumentImageQueries)).toBe(1);
   expect(pageErrors).toEqual([]);
+});
+
+test('no-scan individual filename ignores post action controls', async ({ page }) => {
+  await installUserscriptEnvironment(page);
+  await page.route('https://www.facebook.com/test.profile/photos', route => route.fulfill({
+    contentType: 'text/html',
+    body: noScanFixtureHtml()
+  }));
+  await page.route(/\.(?:jpg|png|webp)(?:\?|$)/, route => route.abort());
+  await page.goto('https://www.facebook.com/test.profile/photos');
+  await page.addScriptTag({ content: noScanUserscript });
+  await expect(page.locator('.fbfr-inline-download')).toHaveCount(1);
+
+  const filename = await page.evaluate(() => window.__fbfrNoScanFilename({
+    key: 'photo:123456789',
+    sourceUrl: 'https://www.facebook.com/test.profile/photos/123456789/',
+    fullUrl: 'https://scontent.example.fbcdn.net/no-scan-photo.jpg',
+    description: 'No-scan profile photo'
+  }));
+  expect(filename).toMatch(/^Test Profile-/);
+  expect(filename).not.toMatch(/^(?:Reply|See more|💾)-/);
 });
 
 test('waits for stale feed DOM to be replaced before scanning a profile Photos page', async ({ page }) => {

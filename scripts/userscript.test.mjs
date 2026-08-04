@@ -178,6 +178,8 @@ test('symbol-only UI controls cannot become filename prefixes', () => {
   const item = { key: 'photo:987654321', sourceUrl: 'https://www.facebook.com/photo.php?fbid=987654321' };
 
   assert.equal(hooks.cleanAccountNameCandidate('💾'), '');
+  assert.equal(hooks.cleanAccountNameCandidate('Reply'), '');
+  assert.equal(hooks.cleanAccountNameCandidate('See more'), '');
   assert.match(hooks.filenameBase(item, 1, 1, '💾'), /^Facebook-/);
   assert.match(hooks.filenameBase(item, 1, 1, 'Test Profile'), /^Test Profile-/);
 });
