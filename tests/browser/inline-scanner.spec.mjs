@@ -71,6 +71,28 @@ function noScanFixtureHtml() {
   </body></html>`;
 }
 
+function groupPostFixtureHtml() {
+  return `<!doctype html><html><head><title>Facebook</title></head><body>
+    <main role="main">
+      <article role="article">
+        <h4 data-ad-rendering-role="profile_name">
+          <a role="link" href="/groups/1679271875623926/">Doppelgänger Search</a>
+        </h4>
+        <div>
+          <a role="link" href="/groups/1679271875623926/user/100029511827848/">
+            <span>Zenechka Estes</span>
+          </a>
+          <span aria-hidden="true"> · </span><span>AI content</span>
+        </div>
+        <a href="/groups/1679271875623926/posts/987654321/">
+          <img id="group-post-photo" src="https://scontent.example.fbcdn.net/group-post-photo.jpg"
+               alt="Group post photo" style="width:320px;height:220px">
+        </a>
+      </article>
+    </main>
+  </body></html>`;
+}
+
 async function installUserscriptEnvironment(page) {
   await page.addInitScript(() => {
     const metrics = { fullDocumentImageQueries: 0 };
@@ -161,6 +183,23 @@ test('no-scan individual filename ignores post action controls', async ({ page }
   expect(result.accountName).toBe('Feed Author');
   expect(result.filename).toMatch(/^Feed Author-/);
   expect(result.filename).not.toMatch(/^(?:\(4\) Facebook|Facebook|Reply|See more|💾)-/);
+});
+
+test('no-scan group post filename uses the member author instead of the group', async ({ page }) => {
+  await installUserscriptEnvironment(page);
+  await page.route('https://www.facebook.com/groups/1679271875623926/', route => route.fulfill({
+    contentType: 'text/html',
+    body: groupPostFixtureHtml()
+  }));
+  await page.route(/\.(?:jpg|png|webp)(?:\?|$)/, route => route.abort());
+  await page.goto('https://www.facebook.com/groups/1679271875623926/');
+  await page.addScriptTag({ content: noScanUserscript });
+  await expect(page.locator('.fbfr-inline-download')).toHaveCount(1);
+
+  const result = await page.evaluate(() => window.__fbfrNoScanFilename(document.querySelector('#group-post-photo')));
+  expect(result.accountName).toBe('Zenechka Estes');
+  expect(result.filename).toMatch(/^Zenechka Estes-/);
+  expect(result.filename).not.toMatch(/^(?:Doppelgänger Search|Facebook)-/);
 });
 
 test('waits for stale feed DOM to be replaced before scanning a profile Photos page', async ({ page }) => {

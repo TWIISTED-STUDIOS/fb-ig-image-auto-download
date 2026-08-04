@@ -1347,16 +1347,20 @@
         return text.length > 110 ? `${text.slice(0, 109).trim()}…` : text;
     }
 
-    function feedAuthorLinkScore(anchor) {
-        if (!(anchor instanceof HTMLAnchorElement)) return 0;
+    function feedAuthorUrlScore(value) {
         try {
-            const parsed = new URL(anchor.href, location.href);
+            const parsed = new URL(value, location.href);
             if (!/^(?:www\.|m\.)?facebook\.com$/i.test(parsed.hostname)) return 0;
             const segments = parsed.pathname.split('/').filter(Boolean).map(segment => decodeURIComponent(segment).toLowerCase());
             const first = segments[0] || '';
             if (first === 'profile.php' && parsed.searchParams.get('id')) return 80;
             if (first === 'people' && segments.length >= 3) return 80;
             if (first === 'pages' && segments.length >= 3) return 70;
+            // Group posts show the group itself as the primary heading, then
+            // identify the actual poster with /groups/{group-id}/user/{user-id}/.
+            // Accept only that explicit member route so the group name cannot
+            // become the downloaded file prefix.
+            if (first === 'groups' && segments[1] && segments[2] === 'user' && segments[3]) return 85;
             const reserved = new Set([
                 'events', 'groups', 'marketplace', 'photo.php', 'photos', 'posts',
                 'reel', 'reels', 'share', 'story.php', 'watch'
@@ -1366,6 +1370,11 @@
             // Ignore malformed or non-Facebook author links.
         }
         return 0;
+    }
+
+    function feedAuthorLinkScore(anchor) {
+        if (!(anchor instanceof HTMLAnchorElement)) return 0;
+        return feedAuthorUrlScore(anchor.href);
     }
 
     function findFeedPostAuthor(img) {
