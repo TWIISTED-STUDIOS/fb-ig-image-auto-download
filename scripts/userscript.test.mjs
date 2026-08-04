@@ -24,6 +24,7 @@ function loadUserscriptHooks() {
         cleanAccountNameCandidate,
         currentProfilePhotoCollectionKey,
         assertFacebookPageUrl,
+        detectAccountName,
         extractPhotoId,
         ensureRetainedProfileScope,
         facebookPhotoId,
@@ -71,6 +72,12 @@ test('group member routes identify post authors without accepting the group itse
     85
   );
   assert.equal(hooks.feedAuthorUrlScore('/groups/1679271875623926/posts/987654321/'), 0);
+});
+
+test('retained group-post authors override generic Facebook page metadata', () => {
+  context.location.href = 'https://www.facebook.com/groups/1478956207177168/';
+  assert.equal(hooks.detectAccountName([{ accountName: 'Emerald Green' }]), 'Emerald Green');
+  context.location.href = 'https://www.facebook.com/example/photos';
 });
 
 test('numeric owner and photo path segments use the photo ID', () => {
