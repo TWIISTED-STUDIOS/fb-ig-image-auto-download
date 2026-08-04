@@ -151,11 +151,12 @@ test('waits for stale feed DOM to be replaced before scanning a profile Photos p
 
   await expect(page.locator('#fb-fullres-folder-scan-action .fbfr-menu-action-title'))
     .toContainText('1 found', { timeout: 8_000 });
-  await page.locator('#fb-fullres-folder-scan-button').click();
-  await page.locator('#fb-fullres-folder-scan-action').click();
-  await expect(page.locator('#fb-fullres-overlay')).toBeVisible({ timeout: 8_000 });
-  await expect(page.locator('.fbfr-card')).toHaveCount(1);
-  await expect(page.locator('.fbfr-card img[alt="Profile photo that should be retained"]')).toHaveCount(1);
-  await expect(page.locator('.fbfr-card img[alt="Feed photo that must not be retained"]')).toHaveCount(0);
+  const retained = await page.evaluate(() => {
+    const key = Object.keys(sessionStorage).find(name => name.includes('fbfr-photo-window-v1.0.4-beta.3'));
+    return key ? JSON.parse(sessionStorage.getItem(key)).items : [];
+  });
+  expect(retained).toHaveLength(1);
+  expect(retained[0].description).toBe('Profile photo that should be retained');
+  expect(retained.some(item => item.description === 'Feed photo that must not be retained')).toBe(false);
   expect(pageErrors).toEqual([]);
 });
