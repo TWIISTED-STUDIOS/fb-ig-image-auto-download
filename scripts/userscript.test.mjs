@@ -21,6 +21,7 @@ function loadUserscriptHooks() {
   const instrumented = source.replace(startup, `    Object.assign(globalThis.__fbfrTestHooks, {
         canonicalSourceKey,
         clampLauncherPosition,
+        currentProfilePhotoCollectionKey,
         assertFacebookPageUrl,
         extractPhotoId,
         ensureRetainedProfileScope,
@@ -152,4 +153,21 @@ test('retained images merge within one profile and clear on a different profile'
   assert.equal(hooks.retainedProfileKey(), 'path:/second.profile');
   assert.equal(hooks.retainedImageCount(), 0);
   assert.equal(sessionValues.size, 0);
+});
+
+test('profile photo collection routes are distinguished from feeds and other profile tabs', () => {
+  context.location.href = 'https://www.facebook.com/first.profile/photos';
+  assert.equal(hooks.currentProfilePhotoCollectionKey(), 'path:/first.profile:photos');
+
+  context.location.href = 'https://www.facebook.com/first.profile/posts';
+  assert.equal(hooks.currentProfilePhotoCollectionKey(), '');
+
+  context.location.href = 'https://www.facebook.com/first.profile/photos/987654321';
+  assert.equal(hooks.currentProfilePhotoCollectionKey(), '');
+
+  context.location.href = 'https://www.facebook.com/';
+  assert.equal(hooks.currentProfilePhotoCollectionKey(), '');
+
+  context.location.href = 'https://www.facebook.com/profile.php?id=123456789&sk=photos';
+  assert.equal(hooks.currentProfilePhotoCollectionKey(), 'id:123456789:photos');
 });

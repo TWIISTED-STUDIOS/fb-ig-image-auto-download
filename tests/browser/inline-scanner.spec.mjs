@@ -36,9 +36,19 @@ function fixtureHtml() {
     </main></body></html>`;
 }
 
-test('processes lazy and rapid image mutations without periodic document sweeps', async ({ page }) => {
-  const pageErrors = [];
-  page.on('pageerror', error => pageErrors.push(error.message));
+function transitionFixtureHtml() {
+  return `<!doctype html><html><head><title>Facebook</title></head><body>
+    <main role="main" id="route-content">
+      <h2>Home feed</h2>
+      <a href="/photos/999999999/888888888/">
+        <img src="https://scontent.example.fbcdn.net/feed-before-navigation.jpg"
+             alt="Feed photo that must not be retained" style="width:320px;height:220px">
+      </a>
+    </main>
+  </body></html>`;
+}
+
+async function installUserscriptEnvironment(page) {
   await page.addInitScript(() => {
     const metrics = { fullDocumentImageQueries: 0 };
     const originalQuerySelectorAll = Document.prototype.querySelectorAll;
@@ -61,6 +71,12 @@ test('processes lazy and rapid image mutations without periodic document sweeps'
     window.alert = () => {};
     window.confirm = () => true;
   });
+}
+
+test('processes lazy and rapid image mutations without periodic document sweeps', async ({ page }) => {
+  const pageErrors = [];
+  page.on('pageerror', error => pageErrors.push(error.message));
+  await installUserscriptEnvironment(page);
   await page.route('https://www.facebook.com/test.profile/photos', route => route.fulfill({
     contentType: 'text/html',
     body: fixtureHtml()
@@ -104,5 +120,42 @@ test('processes lazy and rapid image mutations without periodic document sweeps'
 
   await page.waitForTimeout(5_200);
   expect(await page.evaluate(() => window.__fbfrBrowserMetrics.fullDocumentImageQueries)).toBe(1);
+  expect(pageErrors).toEqual([]);
+});
+
+test('waits for stale feed DOM to be replaced before scanning a profile Photos page', async ({ page }) => {
+  const pageErrors = [];
+  page.on('pageerror', error => pageErrors.push(error.message));
+  await installUserscriptEnvironment(page);
+  await page.route('https://www.facebook.com/test.profile/photos', route => route.fulfill({
+    contentType: 'text/html',
+    body: transitionFixtureHtml()
+  }));
+  await page.route(/\.(?:jpg|png|webp)(?:\?|$)/, route => route.abort());
+  await page.goto('https://www.facebook.com/test.profile/photos');
+  await page.addScriptTag({ content: userscript });
+
+  await page.locator('#fb-fullres-folder-scan-button').click();
+  await page.locator('#fb-fullres-folder-scan-action').click();
+  await page.waitForTimeout(1_700);
+  await page.evaluate(() => {
+    document.querySelector('#route-content').innerHTML = `
+      <h1>Test Profile</h1>
+      <section id="profile-photo-grid">
+        <a href="/test.profile/photos/123456789/">
+          <img src="https://scontent.example.fbcdn.net/profile-photo.jpg"
+               alt="Profile photo that should be retained" style="width:320px;height:220px">
+        </a>
+      </section>`;
+  });
+
+  await expect(page.locator('#fb-fullres-folder-scan-action .fbfr-menu-action-title'))
+    .toContainText('1 found', { timeout: 8_000 });
+  await page.locator('#fb-fullres-folder-scan-button').click();
+  await page.locator('#fb-fullres-folder-scan-action').click();
+  await expect(page.locator('#fb-fullres-overlay')).toBeVisible({ timeout: 8_000 });
+  await expect(page.locator('.fbfr-card')).toHaveCount(1);
+  await expect(page.locator('.fbfr-card img[alt="Profile photo that should be retained"]')).toHaveCount(1);
+  await expect(page.locator('.fbfr-card img[alt="Feed photo that must not be retained"]')).toHaveCount(0);
   expect(pageErrors).toEqual([]);
 });

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Facebook Image Downloader - Verified Full Resolution
 // @namespace    https://github.com/TWIISTED-STUDIOS/fb-ig-image-auto-download
-// @version      1.0.4-beta.2
+// @version      1.0.4-beta.3
 // @description  Deep-scan Facebook photos, resolve verified maximum-resolution files, check a chosen folder for existing images, and download individually or in bulk.
 // @author       Bibek Chand Sah (original project); TWIISTED-STUDIOS contributors (maintained rewrite)
 // @homepageURL  https://github.com/TWIISTED-STUDIOS/fb-ig-image-auto-download
@@ -51,7 +51,7 @@
         minimumRenderedSide: 80,
         scrollStepRatio: 0.88,
         pickerId: 'fb-fullres-download',
-        sessionKey: 'fbfr-photo-window-v0.6.1-manifest',
+        sessionKey: 'fbfr-photo-window-v1.0.4-beta.3-manifest',
         resolverWindowName: 'fbFullResResolver',
         resolverTimeoutMs: 45000,
         resolverPollMs: 350,
@@ -1875,6 +1875,71 @@
         setMainButton(`Scan images${retainedText}`, false);
     }
 
+    function currentProfilePhotoCollectionKey() {
+        const profileKey = currentRetentionProfileKey();
+        if (!profileKey) return '';
+        try {
+            const parsed = new URL(location.href);
+            const segments = parsed.pathname.split('/').filter(Boolean).map(segment => decodeURIComponent(segment).toLowerCase());
+            const first = segments[0] || '';
+            let collection = '';
+            if (first === 'profile.php') {
+                collection = String(parsed.searchParams.get('sk') || '').toLowerCase();
+            } else {
+                const profileRoute = currentProfileRoute();
+                const profileDepth = String(profileRoute?.value || '').split('/').filter(Boolean).length;
+                if (segments.length !== profileDepth + 1) return '';
+                collection = segments[profileDepth] || '';
+            }
+            if (!/^(?:photos?|photos_by|photos_of|photos_albums|albums)$/.test(collection)) return '';
+            return `${profileKey}:${collection}`;
+        } catch (_) {
+            return '';
+        }
+    }
+
+    function profilePhotoCollectionReady() {
+        if (!currentProfilePhotoCollectionKey()) return true;
+        const main = document.querySelector('[role="main"], main');
+        if (!(main instanceof Element)) return false;
+
+        // The normal feed has no profile-level H1. Waiting for one prevents a
+        // /photos URL change from capturing the feed DOM that Facebook has not
+        // replaced yet.
+        for (const heading of main.querySelectorAll('h1, [role="heading"][aria-level="1"]')) {
+            if (visibleElement(heading) && cleanAccountNameCandidate(accountNameTextFromElement(heading))) {
+                return true;
+            }
+        }
+
+        const profileRoute = currentProfileRoute();
+        for (const anchor of main.querySelectorAll('a[href]')) {
+            if (!visibleElement(anchor) || !anchorMatchesCurrentProfile(anchor, profileRoute)) continue;
+            const fontSize = Number.parseFloat(getComputedStyle(anchor).fontSize) || 0;
+            if (fontSize >= 20 || anchor.closest('h1, [role="heading"][aria-level="1"]')) return true;
+        }
+        for (const button of main.querySelectorAll('div[role="button"][tabindex="0"]')) {
+            if (!visibleElement(button) || !directElementText(button)) continue;
+            const fontSize = Number.parseFloat(getComputedStyle(button).fontSize) || 0;
+            if (fontSize >= 22) return true;
+        }
+        return false;
+    }
+
+    async function waitForProfilePhotoCollectionReady(timeoutMs = 15000) {
+        const collectionKey = currentProfilePhotoCollectionKey();
+        if (!collectionKey) return true;
+        const deadline = Date.now() + timeoutMs;
+        let stableChecks = 0;
+        while (Date.now() < deadline) {
+            if (currentProfilePhotoCollectionKey() !== collectionKey) return false;
+            stableChecks = profilePhotoCollectionReady() ? stableChecks + 1 : 0;
+            if (stableChecks >= 2) return true;
+            await sleep(250);
+        }
+        return false;
+    }
+
     async function scanPage({ clearFirst = false } = {}) {
         if (downloading) return;
         if (scanning) {
@@ -1900,7 +1965,17 @@
         try {
             // Start at the top so virtualised album tiles are seen in order.
             window.scrollTo({ top: 0, behavior: 'auto' });
+            const startingCollectionKey = currentProfilePhotoCollectionKey();
+            if (startingCollectionKey && !await waitForProfilePhotoCollectionReady()) {
+                throw new Error('Facebook has not finished loading this profile Photos page. Wait for the profile header and photo grid to appear, then scan again.');
+            }
             await sleep(SETTINGS.initialDelayMs);
+            if (startingCollectionKey && (
+                currentProfilePhotoCollectionKey() !== startingCollectionKey ||
+                !profilePhotoCollectionReady()
+            )) {
+                throw new Error('The profile Photos page changed while the scan was starting. Wait for it to finish loading, then scan again.');
+            }
             // Capture the filename prefix while the profile header is definitely
             // on screen. Facebook may virtualise that header out of the DOM by
             // the time a long scan reaches the bottom.
