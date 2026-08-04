@@ -21,12 +21,14 @@ function loadUserscriptHooks() {
   const instrumented = source.replace(startup, `    Object.assign(globalThis.__fbfrTestHooks, {
         canonicalSourceKey,
         clampLauncherPosition,
+        cleanAccountNameCandidate,
         currentProfilePhotoCollectionKey,
         assertFacebookPageUrl,
         extractPhotoId,
         ensureRetainedProfileScope,
         facebookPhotoId,
         findPhotoLink,
+        filenameBase,
         filenameIdentifier,
         historyIdForItem,
         isFacebookPageUrl,
@@ -170,4 +172,12 @@ test('profile photo collection routes are distinguished from feeds and other pro
 
   context.location.href = 'https://www.facebook.com/profile.php?id=123456789&sk=photos';
   assert.equal(hooks.currentProfilePhotoCollectionKey(), 'id:123456789:photos');
+});
+
+test('symbol-only UI controls cannot become filename prefixes', () => {
+  const item = { key: 'photo:987654321', sourceUrl: 'https://www.facebook.com/photo.php?fbid=987654321' };
+
+  assert.equal(hooks.cleanAccountNameCandidate('💾'), '');
+  assert.match(hooks.filenameBase(item, 1, 1, '💾'), /^Facebook-/);
+  assert.match(hooks.filenameBase(item, 1, 1, 'Test Profile'), /^Test Profile-/);
 });
