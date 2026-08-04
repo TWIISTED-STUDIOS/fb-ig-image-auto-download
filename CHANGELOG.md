@@ -6,7 +6,7 @@ All notable changes to the maintained Facebook downloader are documented here.
 
 ### Fixed
 
-- Use the member name, rather than Facebook or the group name, for group-post individual-download filenames
+- Use the member name, rather than Facebook or the group name, for group-post individual-download filenames, including unlabelled post wrappers
 - Use the nearest news-feed post author for no-scan individual-download filenames
 - Strip unread-notification counts such as `(4)` from Facebook tab-title fallbacks
 - Ignore Reply, See more, and other post actions when naming no-scan individual downloads

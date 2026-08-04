@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Facebook Image Downloader - Verified Full Resolution
 // @namespace    https://github.com/TWIISTED-STUDIOS/fb-ig-image-auto-download
-// @version      1.0.4-beta.7
+// @version      1.0.4-beta.8
 // @description  Deep-scan Facebook photos, resolve verified maximum-resolution files, check a chosen folder for existing images, and download individually or in bulk.
 // @author       Bibek Chand Sah (original project); TWIISTED-STUDIOS contributors (maintained rewrite)
 // @homepageURL  https://github.com/TWIISTED-STUDIOS/fb-ig-image-auto-download
@@ -1377,25 +1377,56 @@
         return feedAuthorUrlScore(anchor.href);
     }
 
-    function findFeedPostAuthor(img) {
+    function findFeedPostScope(img) {
         const article = img.closest('[role="article"], article');
+        if (article instanceof HTMLElement) return article;
+
+        // Some group-feed cards no longer expose role=article. Walk only as far
+        // as the surrounding main feed and select the nearest wrapper that
+        // contains Facebook's explicit post-author signals. Stopping at the
+        // first such wrapper prevents an author from a neighbouring post being
+        // used when several cards share the same feed container.
+        let scope = img.parentElement;
+        while (scope instanceof HTMLElement && !scope.matches('main, [role="main"], body')) {
+            if (scope.querySelector(
+                'a[href*="/groups/"][href*="/user/"], [aria-label^="Actions for this post by "], [aria-label^="Hide post by "]'
+            )) {
+                return scope;
+            }
+            scope = scope.parentElement;
+        }
+        return null;
+    }
+
+    function findFeedPostAuthor(img) {
+        const article = findFeedPostScope(img);
         if (!(article instanceof HTMLElement)) return '';
         const imageRect = img.getBoundingClientRect();
         const candidates = [];
         const seen = new Set();
+        const push = (value, score) => {
+            const name = cleanAccountNameCandidate(value);
+            if (!name || seen.has(name.toLowerCase())) return;
+            seen.add(name.toLowerCase());
+            candidates.push({ name, score });
+        };
         for (const anchor of article.querySelectorAll('h1 a[href], h2 a[href], h3 a[href], strong a[href], a[role="link"][href]')) {
             if (anchor.contains(img) || !visibleElement(anchor)) continue;
             const linkScore = feedAuthorLinkScore(anchor);
             if (!linkScore) continue;
             const name = cleanAccountNameCandidate(accountNameTextFromElement(anchor) || anchor.getAttribute('aria-label'));
-            if (!name || seen.has(name.toLowerCase())) continue;
-            seen.add(name.toLowerCase());
+            if (!name) continue;
             const rect = anchor.getBoundingClientRect();
             let score = linkScore;
             if (anchor.closest('h1, h2, h3, [role="heading"]')) score += 90;
             else if (anchor.closest('strong')) score += 55;
             if (rect.top <= imageRect.top + 8) score += 25;
-            candidates.push({ name, score });
+            push(name, score);
+        }
+        for (const element of article.querySelectorAll('[aria-label^="Actions for this post by "], [aria-label^="Hide post by "]')) {
+            const label = element.getAttribute('aria-label') || '';
+            const match = label.match(/^(?:Actions for this post by|Hide post by)\s+(.+)$/i);
+            if (match) push(match[1], 95);
         }
         candidates.sort((a, b) => b.score - a.score);
         return candidates[0]?.name || '';
