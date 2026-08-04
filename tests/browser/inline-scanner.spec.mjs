@@ -15,13 +15,24 @@ function fixtureHtml() {
     </a>`).join('');
 
   return `<!doctype html>
-    <html><head><title>Test Profile | Facebook</title></head>
+    <html><head><title>Test Profile | Facebook</title>
+      <style>
+        #feed-card { position: relative; width: 240px; height: 160px; }
+        .facebook-absolute-media { position: absolute; inset: 0; }
+        .facebook-absolute-media img { width: 100%; height: 100%; }
+      </style>
+    </head>
     <body><main role="main">
       <h1>Test Profile</h1>
       <section id="grid">${images}</section>
       <a href="/photos/123456789/999999999/">
         <img id="lazy-photo" alt="Lazy photo" style="width:140px;height:100px">
       </a>
+      <article id="feed-card">
+        <a id="feed-media" class="facebook-absolute-media" href="/photos/123456789/777777777/">
+          <img id="feed-photo" alt="Feed photo">
+        </a>
+      </article>
     </main></body></html>`;
 }
 
@@ -80,10 +91,13 @@ test('processes lazy and rapid image mutations without periodic document sweeps'
     addBatch(5, 5);
     await new Promise(resolve => setTimeout(resolve, 100));
     document.querySelector('#lazy-photo').src = 'https://scontent.example.fbcdn.net/lazy-photo.jpg';
+    document.querySelector('#feed-photo').src = 'https://scontent.example.fbcdn.net/feed-photo.jpg';
   });
 
-  await expect(page.locator('.fbfr-inline-download')).toHaveCount(31);
+  await expect(page.locator('.fbfr-inline-download')).toHaveCount(32);
   await expect(page.locator('#lazy-photo').locator('xpath=..').locator('.fbfr-inline-download')).toHaveCount(1);
+  await expect(page.locator('#feed-photo')).toBeVisible();
+  await expect(page.locator('#feed-media')).toHaveCSS('position', 'absolute');
 
   await page.locator('#fb-fullres-folder-scan-button').click();
   await expect(page.locator('#fb-fullres-folder-menu')).toBeVisible();

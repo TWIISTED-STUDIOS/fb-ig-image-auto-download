@@ -6,6 +6,7 @@ All notable changes to the maintained Facebook downloader are documented here.
 
 ### Fixed
 
+- Preserve Facebook's positioned feed-media containers when adding inline download controls
 - Retry initially empty lazy images when Facebook later assigns their real source
 - Preserve every debounced mutation batch so rapidly inserted photos are not skipped
 
