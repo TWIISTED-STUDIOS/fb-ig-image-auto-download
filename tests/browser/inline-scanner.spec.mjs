@@ -146,17 +146,39 @@ test('waits for stale feed DOM to be replaced before scanning a profile Photos p
           <img src="https://scontent.example.fbcdn.net/profile-photo.jpg"
                alt="Profile photo that should be retained" style="width:320px;height:220px">
         </a>
+      </section>
+      <section id="check-ins-module">
+        <h2><a href="/test.profile/map">Check-ins</a></h2>
+        <a href="/pages/Test-Place/111111111">
+          <img src="https://scontent.example.fbcdn.net/check-in-place.png"
+               alt="Check-in place thumbnail" width="80" height="80">
+        </a>
+      </section>
+      <section id="events-module">
+        <h2><a href="/test.profile/events">Events</a></h2>
+        <a href="/events/222222222/">
+          <img src="https://scontent.example.fbcdn.net/event-card.jpg"
+               alt="Event card thumbnail" width="116" height="80">
+        </a>
+      </section>
+      <section id="reviews-module">
+        <h2><a href="/test.profile/reviews_given">Reviews given</a></h2>
+        <a href="/test.profile/posts/review-post">
+          <img src="https://scontent.example.fbcdn.net/review-logo.jpg"
+               alt="Review business logo" width="80" height="80">
+        </a>
       </section>`;
   });
 
   await expect(page.locator('#fb-fullres-folder-scan-action .fbfr-menu-action-title'))
     .toContainText('1 found', { timeout: 8_000 });
   const retained = await page.evaluate(() => {
-    const key = Object.keys(sessionStorage).find(name => name.includes('fbfr-photo-window-v1.0.4-beta.3'));
+    const key = Object.keys(sessionStorage).find(name => name.includes('fbfr-photo-window-v1.0.4-beta.4'));
     return key ? JSON.parse(sessionStorage.getItem(key)).items : [];
   });
   expect(retained).toHaveLength(1);
   expect(retained[0].description).toBe('Profile photo that should be retained');
   expect(retained.some(item => item.description === 'Feed photo that must not be retained')).toBe(false);
+  expect(retained.some(item => /Check-in|Event card|Review business/.test(item.description))).toBe(false);
   expect(pageErrors).toEqual([]);
 });
