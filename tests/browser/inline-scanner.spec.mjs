@@ -7,8 +7,11 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '../..');
 const userscript = fs.readFileSync(path.join(root, 'facebook-simple-downloader.user.js'), 'utf8');
 const startupMarker = '    loadRetainedImages();';
-const noScanUserscript = userscript.replace(startupMarker, `    unsafeWindow.__fbfrNoScanFilename = item =>
-        filenameBase(item, 1, 1, detectAccountName([item]));
+const noScanUserscript = userscript.replace(startupMarker, `    unsafeWindow.__fbfrNoScanFilename = img => {
+        const item = itemFromImageElement(img);
+        const prefix = cleanAccountNameCandidate(item?.accountName) || detectAccountName(item ? [item] : []);
+        return { accountName: item?.accountName || '', filename: filenameBase(item, 1, 1, prefix) };
+    };
 ${startupMarker}`);
 
 function fixtureHtml() {
@@ -53,14 +56,17 @@ function transitionFixtureHtml() {
 }
 
 function noScanFixtureHtml() {
-  return `<!doctype html><html><head><title>Test Profile | Facebook</title></head><body>
+  return `<!doctype html><html><head><title>(4) Facebook</title></head><body>
     <main role="main">
-      <div role="button" tabindex="0" style="width:100px;height:24px">Reply</div>
-      <div role="button" tabindex="0" style="width:100px;height:24px">See more</div>
-      <a href="/test.profile/photos/123456789/">
-        <img src="https://scontent.example.fbcdn.net/no-scan-photo.jpg"
-             alt="No-scan profile photo" style="width:320px;height:220px">
-      </a>
+      <article role="article">
+        <h2><a role="link" href="/feed.author">Feed Author</a></h2>
+        <div role="button" tabindex="0" style="width:100px;height:24px">Reply</div>
+        <div role="button" tabindex="0" style="width:100px;height:24px">See more</div>
+        <a href="/feed.author/photos/123456789/">
+          <img id="no-scan-photo" src="https://scontent.example.fbcdn.net/no-scan-photo.jpg"
+               alt="No-scan feed photo" style="width:320px;height:220px">
+        </a>
+      </article>
     </main>
   </body></html>`;
 }
@@ -142,23 +148,19 @@ test('processes lazy and rapid image mutations without periodic document sweeps'
 
 test('no-scan individual filename ignores post action controls', async ({ page }) => {
   await installUserscriptEnvironment(page);
-  await page.route('https://www.facebook.com/test.profile/photos', route => route.fulfill({
+  await page.route('https://www.facebook.com/', route => route.fulfill({
     contentType: 'text/html',
     body: noScanFixtureHtml()
   }));
   await page.route(/\.(?:jpg|png|webp)(?:\?|$)/, route => route.abort());
-  await page.goto('https://www.facebook.com/test.profile/photos');
+  await page.goto('https://www.facebook.com/');
   await page.addScriptTag({ content: noScanUserscript });
   await expect(page.locator('.fbfr-inline-download')).toHaveCount(1);
 
-  const filename = await page.evaluate(() => window.__fbfrNoScanFilename({
-    key: 'photo:123456789',
-    sourceUrl: 'https://www.facebook.com/test.profile/photos/123456789/',
-    fullUrl: 'https://scontent.example.fbcdn.net/no-scan-photo.jpg',
-    description: 'No-scan profile photo'
-  }));
-  expect(filename).toMatch(/^Test Profile-/);
-  expect(filename).not.toMatch(/^(?:Reply|See more|💾)-/);
+  const result = await page.evaluate(() => window.__fbfrNoScanFilename(document.querySelector('#no-scan-photo')));
+  expect(result.accountName).toBe('Feed Author');
+  expect(result.filename).toMatch(/^Feed Author-/);
+  expect(result.filename).not.toMatch(/^(?:\(4\) Facebook|Facebook|Reply|See more|💾)-/);
 });
 
 test('waits for stale feed DOM to be replaced before scanning a profile Photos page', async ({ page }) => {

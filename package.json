@@ -1,6 +1,6 @@
 {
   "name": "facebook-verified-full-resolution-downloader",
-  "version": "1.0.4-beta.6",
+  "version": "1.0.4-beta.7",
   "private": true,
   "description": "Validation tools for the TWIISTED-STUDIOS maintained Facebook full-resolution userscript.",
   "scripts": {

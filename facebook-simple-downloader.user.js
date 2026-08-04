@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Facebook Image Downloader - Verified Full Resolution
 // @namespace    https://github.com/TWIISTED-STUDIOS/fb-ig-image-auto-download
-// @version      1.0.4-beta.6
+// @version      1.0.4-beta.7
 // @description  Deep-scan Facebook photos, resolve verified maximum-resolution files, check a chosen folder for existing images, and download individually or in bulk.
 // @author       Bibek Chand Sah (original project); TWIISTED-STUDIOS contributors (maintained rewrite)
 // @homepageURL  https://github.com/TWIISTED-STUDIOS/fb-ig-image-auto-download
@@ -1347,6 +1347,51 @@
         return text.length > 110 ? `${text.slice(0, 109).trim()}…` : text;
     }
 
+    function feedAuthorLinkScore(anchor) {
+        if (!(anchor instanceof HTMLAnchorElement)) return 0;
+        try {
+            const parsed = new URL(anchor.href, location.href);
+            if (!/^(?:www\.|m\.)?facebook\.com$/i.test(parsed.hostname)) return 0;
+            const segments = parsed.pathname.split('/').filter(Boolean).map(segment => decodeURIComponent(segment).toLowerCase());
+            const first = segments[0] || '';
+            if (first === 'profile.php' && parsed.searchParams.get('id')) return 80;
+            if (first === 'people' && segments.length >= 3) return 80;
+            if (first === 'pages' && segments.length >= 3) return 70;
+            const reserved = new Set([
+                'events', 'groups', 'marketplace', 'photo.php', 'photos', 'posts',
+                'reel', 'reels', 'share', 'story.php', 'watch'
+            ]);
+            if (segments.length === 1 && !reserved.has(first)) return 75;
+        } catch (_) {
+            // Ignore malformed or non-Facebook author links.
+        }
+        return 0;
+    }
+
+    function findFeedPostAuthor(img) {
+        const article = img.closest('[role="article"], article');
+        if (!(article instanceof HTMLElement)) return '';
+        const imageRect = img.getBoundingClientRect();
+        const candidates = [];
+        const seen = new Set();
+        for (const anchor of article.querySelectorAll('h1 a[href], h2 a[href], h3 a[href], strong a[href], a[role="link"][href]')) {
+            if (anchor.contains(img) || !visibleElement(anchor)) continue;
+            const linkScore = feedAuthorLinkScore(anchor);
+            if (!linkScore) continue;
+            const name = cleanAccountNameCandidate(accountNameTextFromElement(anchor) || anchor.getAttribute('aria-label'));
+            if (!name || seen.has(name.toLowerCase())) continue;
+            seen.add(name.toLowerCase());
+            const rect = anchor.getBoundingClientRect();
+            let score = linkScore;
+            if (anchor.closest('h1, h2, h3, [role="heading"]')) score += 90;
+            else if (anchor.closest('strong')) score += 55;
+            if (rect.top <= imageRect.top + 8) score += 25;
+            candidates.push({ name, score });
+        }
+        candidates.sort((a, b) => b.score - a.score);
+        return candidates[0]?.name || '';
+    }
+
     function captureImageElement(img, imageMap) {
         if (!(img instanceof HTMLImageElement)) return { added: 0, upgraded: 0 };
 
@@ -1369,6 +1414,7 @@
             candidateUrls: extracted.candidateUrls,
             width: Math.round(size.width),
             height: Math.round(size.height),
+            accountName: findFeedPostAuthor(img),
             description: cleanDescription(img.alt || img.getAttribute('aria-label') || '')
         };
 
@@ -1385,6 +1431,7 @@
             imageMap.set(key, {
                 ...existing,
                 ...item,
+                accountName: item.accountName || existing.accountName,
                 description: item.description || existing.description,
                 sourceUrl: item.sourceUrl || existing.sourceUrl,
                 candidateUrls: Array.from(new Set([...(item.candidateUrls || []), ...(existing.candidateUrls || [])])).slice(0, 30)
@@ -1740,7 +1787,7 @@
 
         try {
             const asset = await resolveVerifiedBackgroundAsset(item);
-            const prefix = detectAccountName([item]);
+            const prefix = cleanAccountNameCandidate(item.accountName) || detectAccountName([item]);
             const base = filenameBase(item, 1, 1, prefix);
             const extension = extensionForContentType(asset.fetched.contentType, asset.url);
             const filename = `${base}.${extension}`;
@@ -2142,6 +2189,7 @@
 
     function cleanAccountNameCandidate(value) {
         let text = String(value || '')
+            .replace(/^\(\s*\d+\s*\)\s*/, '')
             .replace(/\s*[|·-]\s*Facebook\s*$/i, '')
             .replace(/^Facebook\s*[|·-]\s*/i, '')
             .replace(/^Photos\s+of\s+/i, '')

@@ -6,6 +6,8 @@ All notable changes to the maintained Facebook downloader are documented here.
 
 ### Fixed
 
+- Use the nearest news-feed post author for no-scan individual-download filenames
+- Strip unread-notification counts such as `(4)` from Facebook tab-title fallbacks
 - Ignore Reply, See more, and other post actions when naming no-scan individual downloads
 - Prevent the inline 💾 control from becoming an individual-download filename prefix
 - Exclude Check-ins, Events, and Reviews utility-module thumbnails from photo scans
