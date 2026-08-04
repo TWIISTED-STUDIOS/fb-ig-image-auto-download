@@ -2,6 +2,30 @@
 
 All notable changes to the maintained Facebook downloader are documented here.
 
+## Unreleased
+
+### Fixed
+
+- Use the member name, rather than Facebook or the group name, for group-post individual-download filenames, including unlabelled post wrappers
+- Use the nearest news-feed post author for no-scan individual-download filenames
+- Strip unread-notification counts such as `(4)` from Facebook tab-title fallbacks
+- Ignore Reply, See more, and other post actions when naming no-scan individual downloads
+- Prevent the inline 💾 control from becoming an individual-download filename prefix
+- Exclude Check-ins, Events, and Reviews utility-module thumbnails from photo scans
+- Wait for Facebook to replace stale feed content before capturing a profile Photos page
+- Preserve Facebook's positioned feed-media containers when adding inline download controls
+- Retry initially empty lazy images when Facebook later assigns their real source
+- Preserve every debounced mutation batch so rapidly inserted photos are not skipped
+
+### Changed
+
+- Replace the five-second whole-document image sweep with targeted mutation processing
+
+### Tests
+
+- Add regression coverage for Facebook group-member author links
+- Add Playwright coverage for initial, lazy, and rapidly inserted images plus launcher interaction
+
 ## 1.0.3 - 2026-08-03
 
 ### Fixed

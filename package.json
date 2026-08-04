@@ -1,14 +1,18 @@
 {
   "name": "facebook-verified-full-resolution-downloader",
-  "version": "1.0.3",
+  "version": "1.0.4-beta.8",
   "private": true,
   "description": "Validation tools for the TWIISTED-STUDIOS maintained Facebook full-resolution userscript.",
   "scripts": {
     "check": "node scripts/check-userscript.mjs && node --test scripts/userscript.test.mjs",
-    "test": "node --test scripts/userscript.test.mjs"
+    "test": "node --test scripts/userscript.test.mjs",
+    "test:browser": "playwright test"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "@playwright/test": "1.62.1"
+  }
 }
