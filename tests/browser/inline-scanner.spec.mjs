@@ -87,7 +87,7 @@ function groupPostFixtureHtml() {
           </div>
           <div role="button" aria-label="Actions for this post by Zenechka Estes"></div>
         </div>
-        <a href="/groups/1679271875623926/posts/987654321/">
+        <a href="/photo.php?fbid=987654321">
           <img id="group-post-photo" src="https://scontent.example.fbcdn.net/group-post-photo.jpg"
                alt="Group post photo" style="width:320px;height:220px">
         </a>
