@@ -180,6 +180,8 @@ test('symbol-only UI controls cannot become filename prefixes', () => {
   assert.equal(hooks.cleanAccountNameCandidate('💾'), '');
   assert.equal(hooks.cleanAccountNameCandidate('Reply'), '');
   assert.equal(hooks.cleanAccountNameCandidate('See more'), '');
+  assert.equal(hooks.cleanAccountNameCandidate('(4) Facebook'), '');
+  assert.equal(hooks.cleanAccountNameCandidate('(12) Test Profile | Facebook'), 'Test Profile');
   assert.match(hooks.filenameBase(item, 1, 1, '💾'), /^Facebook-/);
   assert.match(hooks.filenameBase(item, 1, 1, 'Test Profile'), /^Test Profile-/);
 });
