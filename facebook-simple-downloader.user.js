@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Facebook Image Downloader - Verified Full Resolution
 // @namespace    https://github.com/TWIISTED-STUDIOS/fb-ig-image-auto-download
-// @version      1.0.4-beta.8
+// @version      1.0.4-beta.9
 // @description  Deep-scan Facebook photos, resolve verified maximum-resolution files, check a chosen folder for existing images, and download individually or in bulk.
 // @author       Bibek Chand Sah (original project); TWIISTED-STUDIOS contributors (maintained rewrite)
 // @homepageURL  https://github.com/TWIISTED-STUDIOS/fb-ig-image-auto-download
@@ -2463,6 +2463,25 @@
 
     function detectAccountName(images = []) {
         const profileRoute = currentProfileRoute();
+
+        // Feed and group captures already retain the author beside each image.
+        // Prefer that post-local evidence over page metadata: group routes often
+        // have the generic title "Facebook", while their visible header names
+        // the group rather than the member who posted the photo.
+        const retainedAuthors = new Map();
+        for (const item of images) {
+            const author = cleanAccountNameCandidate(item?.accountName);
+            if (!author) continue;
+            const key = author.toLowerCase();
+            const existing = retainedAuthors.get(key);
+            retainedAuthors.set(key, {
+                value: existing?.value || author,
+                count: (existing?.count || 0) + 1
+            });
+        }
+        const retainedAuthor = Array.from(retainedAuthors.values())
+            .sort((a, b) => b.count - a.count)[0]?.value;
+        if (retainedAuthor) return cacheAccountName(retainedAuthor, profileRoute);
 
         // Use the visible profile heading before document metadata. Facebook's
         // metadata can become stale during SPA navigation and may contain a tab
