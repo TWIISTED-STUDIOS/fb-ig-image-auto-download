@@ -74,21 +74,24 @@ function noScanFixtureHtml() {
 function groupPostFixtureHtml() {
   return `<!doctype html><html><head><title>Facebook</title></head><body>
     <main role="main">
-      <article role="article">
-        <h4 data-ad-rendering-role="profile_name">
-          <a role="link" href="/groups/1679271875623926/">Doppelgänger Search</a>
-        </h4>
-        <div>
-          <a role="link" href="/groups/1679271875623926/user/100029511827848/">
-            <span>Zenechka Estes</span>
-          </a>
-          <span aria-hidden="true"> · </span><span>AI content</span>
+      <div class="unlabelled-group-post-wrapper">
+        <div class="group-post-header">
+          <h4 data-ad-rendering-role="profile_name">
+            <a role="link" href="/groups/1679271875623926/">Doppelgänger Search</a>
+          </h4>
+          <div>
+            <a role="link" href="/groups/1679271875623926/user/100029511827848/">
+              <span>Zenechka Estes</span>
+            </a>
+            <span aria-hidden="true"> · </span><span>AI content</span>
+          </div>
+          <div role="button" aria-label="Actions for this post by Zenechka Estes"></div>
         </div>
         <a href="/groups/1679271875623926/posts/987654321/">
           <img id="group-post-photo" src="https://scontent.example.fbcdn.net/group-post-photo.jpg"
                alt="Group post photo" style="width:320px;height:220px">
         </a>
-      </article>
+      </div>
     </main>
   </body></html>`;
 }
