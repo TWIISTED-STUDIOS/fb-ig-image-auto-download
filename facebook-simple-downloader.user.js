@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Facebook Image Downloader - Verified Full Resolution
 // @namespace    https://github.com/TWIISTED-STUDIOS/fb-ig-image-auto-download
-// @version      1.0.4-beta.3
+// @version      1.0.4-beta.4
 // @description  Deep-scan Facebook photos, resolve verified maximum-resolution files, check a chosen folder for existing images, and download individually or in bulk.
 // @author       Bibek Chand Sah (original project); TWIISTED-STUDIOS contributors (maintained rewrite)
 // @homepageURL  https://github.com/TWIISTED-STUDIOS/fb-ig-image-auto-download
@@ -51,7 +51,7 @@
         minimumRenderedSide: 80,
         scrollStepRatio: 0.88,
         pickerId: 'fb-fullres-download',
-        sessionKey: 'fbfr-photo-window-v1.0.4-beta.3-manifest',
+        sessionKey: 'fbfr-photo-window-v1.0.4-beta.4-manifest',
         resolverWindowName: 'fbFullResResolver',
         resolverTimeoutMs: 45000,
         resolverPollMs: 350,
@@ -1238,9 +1238,31 @@
         return '';
     }
 
+    function isExcludedProfileUtilityImage(img) {
+        const excludedHeading = /^(?:check-?ins?|events?|reviews?(?: given)?)$/i;
+        const excludedRoute = /\/(?:map|events|past_events|reviews_given|reviews_written|place_reviews_written)\/?$/i;
+        let scope = img.parentElement;
+        for (let depth = 0; scope && depth < 16; depth += 1, scope = scope.parentElement) {
+            if (scope.matches('main, [role="main"], body')) break;
+            for (const heading of scope.querySelectorAll('h2')) {
+                const label = String(heading.textContent || '').replace(/\s+/g, ' ').trim();
+                const headingLink = heading.querySelector('a[href]');
+                let routeExcluded = false;
+                try {
+                    routeExcluded = excludedRoute.test(new URL(headingLink?.href || '', location.href).pathname);
+                } catch (_) {
+                    // The visible semantic heading remains sufficient.
+                }
+                if (excludedHeading.test(label) || routeExcluded) return true;
+            }
+        }
+        return false;
+    }
+
     function isLikelyContentPhoto(img, fullUrl) {
         if (!isFacebookImageUrl(fullUrl)) return false;
         if (img.closest(`#${IDS.overlay}, nav, [role="navigation"], [role="banner"]`)) return false;
+        if (isExcludedProfileUtilityImage(img)) return false;
 
         const { width, height } = getRenderedSize(img);
         const photoLink = findPhotoLink(img);
@@ -1250,6 +1272,14 @@
         // when the currently rendered thumbnail is small.
         if (photoLink) return true;
         if (width < SETTINGS.minimumRenderedSide && height < SETTINGS.minimumRenderedSide) return false;
+
+        // Non-photo-linked images in profile cards are commonly avatars,
+        // event thumbnails, place icons, or review logos rather than entries
+        // from the person's photo library.
+        const rect = img.getBoundingClientRect();
+        const displayedWidth = Math.max(rect.width || 0, Number(img.getAttribute('width')) || 0);
+        const displayedHeight = Math.max(rect.height || 0, Number(img.getAttribute('height')) || 0);
+        if (displayedWidth < 160 && displayedHeight < 160) return false;
 
         const alt = String(img.alt || img.getAttribute('aria-label') || '').toLowerCase();
         if (/emoji|icon|logo|sticker|reaction/.test(alt) && largestSide < 420) return false;
