@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Facebook Image Downloader - Verified Full Resolution
 // @namespace    https://github.com/TWIISTED-STUDIOS/fb-ig-image-auto-download
-// @version      1.0.4-beta.1
+// @version      1.0.4-beta.2
 // @description  Deep-scan Facebook photos, resolve verified maximum-resolution files, check a chosen folder for existing images, and download individually or in bulk.
 // @author       Bibek Chand Sah (original project); TWIISTED-STUDIOS contributors (maintained rewrite)
 // @homepageURL  https://github.com/TWIISTED-STUDIOS/fb-ig-image-auto-download
@@ -531,7 +531,9 @@
         .fbfr-inline-download[data-success="true"] { background: rgba(5,150,105,.92); }
         @keyframes fbfr-pulse { 50% { transform: scale(.92); opacity: .72; } }
 
-        .fbfr-inline-host { position: relative !important; }
+        /* Supply a containing block only when Facebook has not defined one.
+           Zero specificity ensures its feed layout rules always win. */
+        :where(.fbfr-inline-host) { position: relative; }
         .fbfr-inline-download {
             position: absolute;
             top: 10px;
